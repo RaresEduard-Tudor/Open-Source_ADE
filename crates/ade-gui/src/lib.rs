@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
@@ -29,28 +29,65 @@ use ade_core::session::Session;
 use ade_core::skills::SkillRegistry;
 use ade_core::tools::{safe_join, ToolContext, ToolRegistry};
 
-/// Process-wide state: loaded config, working dir, the live conversation, and
-/// the bookkeeping that lets a synchronous permission check await a click in
-/// the webview.
+/// Process-wide, read-only state shared by every window: config, project dir,
+/// the merged tool registry, the system prompt, and the live MCP servers.
 pub(crate) struct AppState {
     cfg: Config,
     pub(crate) cwd: PathBuf,
-    session: Mutex<Session>,
-    /// JSONL file the conversation is persisted to (survives restarts).
-    session_path: PathBuf,
     /// Built once: built-in tools + skills + shared MCP tools.
     registry: ToolRegistry,
     /// System prompt (includes skill advertisements), built once.
     system: String,
     /// Keeps the shared MCP servers alive for the process lifetime.
     _mcp: McpHost,
+}
+
+/// Per-window state: each window has its own conversation, permission
+/// bookkeeping, and cancel signal, so windows don't mirror one another.
+struct WinCtx {
+    session: Mutex<Session>,
+    /// JSONL file this window's conversation persists to.
+    session_path: PathBuf,
     /// In-flight permission requests: id -> reply channel.
     pending: Mutex<HashMap<u64, mpsc::Sender<u8>>>,
     next_perm_id: AtomicU64,
-    /// Tools the user chose "always allow" for this session.
+    /// Tools the user chose "always allow" for this window's session.
     session_allow: Mutex<HashSet<String>>,
-    /// Notified to cancel the in-flight agent turn.
+    /// Notified to cancel this window's in-flight agent turn.
     cancel: tokio::sync::Notify,
+}
+
+/// Registry of per-window contexts, keyed by Tauri window label.
+#[derive(Default)]
+struct Windows {
+    map: Mutex<HashMap<String, Arc<WinCtx>>>,
+}
+
+impl Windows {
+    /// Get (or lazily create) the context for `label`, restoring its saved
+    /// conversation the first time it's seen.
+    fn ctx(&self, label: &str, cwd: &std::path::Path) -> Arc<WinCtx> {
+        let mut map = self.map.lock().unwrap();
+        if let Some(c) = map.get(label) {
+            return c.clone();
+        }
+        let session_path = Session::dir(cwd).join(format!("win-{label}.jsonl"));
+        let session = Session::load(&session_path).unwrap_or_default();
+        let ctx = Arc::new(WinCtx {
+            session: Mutex::new(session),
+            session_path,
+            pending: Mutex::new(HashMap::new()),
+            next_perm_id: AtomicU64::new(1),
+            session_allow: Mutex::new(HashSet::new()),
+            cancel: tokio::sync::Notify::new(),
+        });
+        map.insert(label.to_string(), ctx.clone());
+        ctx
+    }
+
+    fn get(&self, label: &str) -> Option<Arc<WinCtx>> {
+        self.map.lock().unwrap().get(label).cloned()
+    }
 }
 
 #[derive(Serialize)]
@@ -158,28 +195,33 @@ fn save_file_text(state: State<AppState>, rel: String, content: String) -> Resul
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
-/// Emits agent activity to the webview as Tauri events.
+/// Emits agent activity to one window as Tauri events.
 struct GuiReporter {
     app: AppHandle,
+    label: String,
+}
+
+impl GuiReporter {
+    fn emit(&self, event: &str, payload: serde_json::Value) {
+        let _ = self.app.emit_to(self.label.as_str(), event, payload);
+    }
 }
 
 impl Reporter for GuiReporter {
     fn on_assistant_delta(&self, text: &str) {
-        let _ = self.app.emit("assistant-delta", text);
+        self.emit("assistant-delta", serde_json::json!(text));
     }
     fn on_assistant_end(&self) {
-        let _ = self.app.emit("assistant-end", ());
+        self.emit("assistant-end", serde_json::json!(null));
     }
     fn on_tool_call(&self, name: &str, summary: &str) {
-        let _ = self.app.emit("tool-call", serde_json::json!({"name": name, "summary": summary}));
+        self.emit("tool-call", serde_json::json!({"name": name, "summary": summary}));
     }
     fn on_tool_result(&self, name: &str, result: &str, ok: bool) {
-        let _ = self
-            .app
-            .emit("tool-result", serde_json::json!({"name": name, "result": result, "ok": ok}));
+        self.emit("tool-result", serde_json::json!({"name": name, "result": result, "ok": ok}));
     }
     fn on_denied(&self, name: &str, _summary: &str) {
-        let _ = self.app.emit("tool-result", serde_json::json!({"name": name, "result": "denied", "ok": false}));
+        self.emit("tool-result", serde_json::json!({"name": name, "result": "denied", "ok": false}));
     }
 }
 
@@ -189,20 +231,22 @@ impl Reporter for GuiReporter {
 /// (this is why the GUI needs the multi-threaded Tokio runtime).
 struct GuiApprover {
     app: AppHandle,
+    label: String,
+    ctx: Arc<WinCtx>,
 }
 
 impl Approver for GuiApprover {
     fn approve(&self, req: &ApprovalRequest) -> Decision {
-        let state = self.app.state::<AppState>();
-        if state.session_allow.lock().unwrap().contains(&req.tool) {
+        if self.ctx.session_allow.lock().unwrap().contains(&req.tool) {
             return Decision::Allow;
         }
 
-        let id = state.next_perm_id.fetch_add(1, Ordering::Relaxed);
+        let id = self.ctx.next_perm_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::channel::<u8>();
-        state.pending.lock().unwrap().insert(id, tx);
+        self.ctx.pending.lock().unwrap().insert(id, tx);
 
-        let _ = self.app.emit(
+        let _ = self.app.emit_to(
+            self.label.as_str(),
             "permission-request",
             serde_json::json!({"id": id, "tool": req.tool, "summary": req.summary}),
         );
@@ -212,7 +256,7 @@ impl Approver for GuiApprover {
         match rx.recv().unwrap_or(0) {
             1 => Decision::Allow,
             2 => {
-                state.session_allow.lock().unwrap().insert(req.tool.clone());
+                self.ctx.session_allow.lock().unwrap().insert(req.tool.clone());
                 Decision::Allow
             }
             _ => Decision::Deny,
@@ -222,9 +266,11 @@ impl Approver for GuiApprover {
 
 /// Frontend delivers the user's permission choice (0 deny / 1 allow / 2 always).
 #[tauri::command]
-fn respond_permission(state: State<AppState>, id: u64, choice: u8) {
-    if let Some(tx) = state.pending.lock().unwrap().remove(&id) {
-        let _ = tx.send(choice);
+fn respond_permission(window: tauri::Window, windows: State<Windows>, id: u64, choice: u8) {
+    if let Some(ctx) = windows.get(window.label()) {
+        if let Some(tx) = ctx.pending.lock().unwrap().remove(&id) {
+            let _ = tx.send(choice);
+        }
     }
 }
 
@@ -232,14 +278,17 @@ fn respond_permission(state: State<AppState>, id: u64, choice: u8) {
 #[tauri::command]
 async fn send_prompt(
     app: AppHandle,
+    window: tauri::Window,
     prompt: String,
     model: Option<String>,
 ) -> Result<String, String> {
     let state = app.state::<AppState>();
+    let label = window.label().to_string();
+    let winctx = app.state::<Windows>().ctx(&label, &state.cwd);
 
     let gate = PermissionGate::new(
         state.cfg.permission.allow.clone(),
-        Box::new(GuiApprover { app: app.clone() }),
+        Box::new(GuiApprover { app: app.clone(), label: label.clone(), ctx: winctx.clone() }),
     );
     let ctx = ToolContext { root: state.cwd.clone() };
 
@@ -248,9 +297,9 @@ async fn send_prompt(
             .map_err(|e| e.to_string())?;
 
     // Clone history out so we don't hold the lock across awaits.
-    let mut session = state.session.lock().unwrap().clone();
+    let mut session = winctx.session.lock().unwrap().clone();
 
-    let reporter = GuiReporter { app: app.clone() };
+    let reporter = GuiReporter { app: app.clone(), label };
     let agent = Agent {
         provider: providerb.as_ref(),
         registry: &state.registry, // shared: builtins + skills + MCP
@@ -266,26 +315,28 @@ async fn send_prompt(
         tokio::pin!(run);
         tokio::select! {
             r = &mut run => Some(r.map_err(|e| e.to_string())),
-            _ = state.cancel.notified() => None,
+            _ = winctx.cancel.notified() => None,
         }
     };
 
     match outcome {
         Some(r) => {
-            // Persist updated history into shared state and to disk so the
-            // conversation survives a restart.
-            let _ = session.save(&state.session_path);
-            *state.session.lock().unwrap() = session;
+            // Persist updated history into this window's state and to disk so
+            // the conversation survives a restart.
+            let _ = session.save(&winctx.session_path);
+            *winctx.session.lock().unwrap() = session;
             r
         }
         None => Ok("(cancelled)".to_string()), // partial turn discarded
     }
 }
 
-/// Cancel the in-flight agent turn.
+/// Cancel this window's in-flight agent turn.
 #[tauri::command]
-fn stop(state: State<AppState>) {
-    state.cancel.notify_waiters();
+fn stop(window: tauri::Window, windows: State<Windows>) {
+    if let Some(ctx) = windows.get(window.label()) {
+        ctx.cancel.notify_waiters();
+    }
 }
 
 #[derive(Serialize)]
@@ -297,13 +348,15 @@ struct ChatTurn {
 /// User/assistant text from the restored conversation, for repainting the chat
 /// on startup. Tool calls and results are omitted (history, not live activity).
 #[tauri::command]
-fn session_history(state: State<AppState>) -> Vec<ChatTurn> {
+fn session_history(
+    window: tauri::Window,
+    state: State<AppState>,
+    windows: State<Windows>,
+) -> Vec<ChatTurn> {
     use ade_core::provider::Role;
-    state
-        .session
-        .lock()
-        .unwrap()
-        .messages
+    let ctx = windows.ctx(window.label(), &state.cwd);
+    let msgs = ctx.session.lock().unwrap();
+    msgs.messages
         .iter()
         .filter_map(|m| match m.role {
             Role::User if !m.content.is_empty() => {
@@ -317,12 +370,14 @@ fn session_history(state: State<AppState>) -> Vec<ChatTurn> {
         .collect()
 }
 
-/// Wipe the conversation (in memory and on disk). Frontend clears its own
-/// transcript log separately.
+/// Wipe this window's conversation (in memory and on disk). Frontend clears its
+/// own transcript log separately.
 #[tauri::command]
-fn clear_session(state: State<AppState>) {
-    *state.session.lock().unwrap() = Session::new();
-    let _ = std::fs::remove_file(&state.session_path);
+fn clear_session(window: tauri::Window, windows: State<Windows>) {
+    if let Some(ctx) = windows.get(window.label()) {
+        *ctx.session.lock().unwrap() = Session::new();
+        let _ = std::fs::remove_file(&ctx.session_path);
+    }
 }
 
 /// Open another window on the same project (side-by-side editing).
@@ -389,25 +444,11 @@ pub fn run() {
         system.push_str(&sk);
     }
 
-    // Resume the previous conversation if one was saved.
-    let session_path = Session::dir(&cwd).join("gui.jsonl");
-    let session = Session::load(&session_path).unwrap_or_default();
     let watch_root = cwd.clone();
 
     tauri::Builder::default()
-        .manage(AppState {
-            cfg,
-            cwd,
-            session: Mutex::new(session),
-            session_path,
-            registry,
-            system,
-            _mcp: mcp,
-            pending: Mutex::new(HashMap::new()),
-            next_perm_id: AtomicU64::new(1),
-            session_allow: Mutex::new(HashSet::new()),
-            cancel: tokio::sync::Notify::new(),
-        })
+        .manage(AppState { cfg, cwd, registry, system, _mcp: mcp })
+        .manage(Windows::default())
         .manage(terminal::Terminals::default())
         .setup(move |app| {
             spawn_fs_watcher(app.handle().clone(), watch_root);

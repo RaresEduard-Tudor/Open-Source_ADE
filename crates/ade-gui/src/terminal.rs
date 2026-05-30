@@ -41,9 +41,15 @@ fn default_shell() -> CommandBuilder {
 /// Open a terminal sized `rows`x`cols`, spawned in the project root. Returns its
 /// id. Output arrives as `term-output` events `{ id, data }`.
 #[tauri::command]
-pub fn term_open(app: AppHandle, rows: u16, cols: u16) -> Result<u64, String> {
+pub fn term_open(
+    app: AppHandle,
+    window: tauri::Window,
+    rows: u16,
+    cols: u16,
+) -> Result<u64, String> {
     let state = app.state::<AppState>();
     let terms = app.state::<Terminals>();
+    let label = window.label().to_string();
 
     let pty = portable_pty::native_pty_system();
     let pair = pty
@@ -67,7 +73,7 @@ pub fn term_open(app: AppHandle, rows: u16, cols: u16) -> Result<u64, String> {
         .unwrap()
         .insert(id, Terminal { master: pair.master, writer });
 
-    // Stream output to the webview until the shell exits.
+    // Stream output to the owning window until the shell exits.
     let app2 = app.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
@@ -76,12 +82,16 @@ pub fn term_open(app: AppHandle, rows: u16, cols: u16) -> Result<u64, String> {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app2.emit("term-output", serde_json::json!({"id": id, "data": data}));
+                    let _ = app2.emit_to(
+                        label.as_str(),
+                        "term-output",
+                        serde_json::json!({"id": id, "data": data}),
+                    );
                 }
             }
         }
         let _ = child.wait();
-        let _ = app2.emit("term-exit", serde_json::json!({"id": id}));
+        let _ = app2.emit_to(label.as_str(), "term-exit", serde_json::json!({"id": id}));
         if let Some(terms) = app2.try_state::<Terminals>() {
             terms.map.lock().unwrap().remove(&id);
         }

@@ -16,6 +16,11 @@ const sbModel = $("sb-model");
 const sbRoot = $("sb-root");
 const newWindowBtn = $("new-window");
 const clearChatBtn = $("clear-chat");
+const bellBtn = $("bell");
+const bellBadge = $("bell-badge");
+const notifEl = $("notif");
+const notifList = $("notif-list");
+const panelMaxBtn = $("panel-max");
 
 const EMPTY_HTML =
   '<div class="empty" id="empty"><div class="empty-logo">◆</div>' +
@@ -111,6 +116,7 @@ listen("tool-call", (e) => {
   if (liveAssistant) liveAssistant.classList.remove("streaming");
   liveAssistant = null;
   addTool(e.payload.name, e.payload.summary);
+  notify("tool", e.payload.name + (e.payload.summary ? ": " + e.payload.summary : ""));
 });
 
 function isDiff(text) {
@@ -171,6 +177,7 @@ listen("permission-request", (e) => {
   liveAssistant = null;
   clearEmpty();
   const { id, tool, summary } = e.payload;
+  notify("perm", "Permission requested: " + tool);
   const card = document.createElement("div");
   card.className = "perm";
   const q = document.createElement("div");
@@ -312,8 +319,9 @@ function loadTree() {
 
 // --- editor (CodeMirror tabs) -----------------------------------------------
 
-const editors = new Map(); // rel -> { cm, dirty, tabEl, wrap }
+const editors = new Map(); // rel -> { cm, dirty, tabEl, wrap, map, view }
 let activeEditor = null;
+let booting = true; // suppress terminal→editor focus switch while restoring tabs
 const cmHost = $("cm-host");
 const editorTabs = $("editor-tabs");
 
@@ -344,6 +352,7 @@ function setEditorPath() {
 }
 
 async function openFile(rel) {
+  if (!booting) setFocus("editor"); // a file opens → editor takes the center
   if (editors.has(rel)) return selectEditor(rel);
   let text;
   try {
@@ -508,6 +517,7 @@ function closeEditor(rel) {
     else {
       cmHost.innerHTML = '<div class="cm-empty">Select a file from the explorer.</div>';
       setEditorPath();
+      setFocus("terminal"); // no files left → terminal back to center
     }
   }
   persistTabs();
@@ -569,11 +579,13 @@ async function send() {
     const res = await invoke("send_prompt", { prompt, model: modelSel.value || null });
     const cancelled = res === "(cancelled)";
     setStatus(cancelled ? "cancelled" : "ready", cancelled ? "error" : "idle");
+    notify(cancelled ? "warn" : "done", cancelled ? "Turn cancelled" : "Turn complete");
     loadTree();
     reloadOpenFile();
   } catch (e) {
     addMessage("assistant", "⚠ " + e);
     setStatus("error", "error");
+    notify("error", String(e));
   } finally {
     stopBtn.classList.add("hidden");
     sendBtn.classList.remove("hidden");
@@ -902,6 +914,201 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
+// --- layout focus (terminal-centric) ----------------------------------------
+
+// The terminal is the centerpiece on launch; opening a file drops it to a
+// small bottom panel. This toggles between the two.
+function setFocus(mode) {
+  document.body.dataset.focus = mode;
+  panelMaxBtn.textContent = mode === "terminal" ? "⤡" : "⤢";
+  panelMaxBtn.title =
+    (mode === "terminal" ? "Restore editor" : "Maximize terminal") + " (Ctrl/Cmd+`)";
+  if (mode === "terminal") {
+    showPanelTab("terminal");
+    setTimeout(fitActiveTerminal, 0);
+  } else if (activeEditor) {
+    const ed = editors.get(activeEditor);
+    if (ed) {
+      ed.cm.refresh();
+      renderMinimap(activeEditor);
+    }
+  }
+}
+function toggleFocus() {
+  if (document.body.dataset.focus === "terminal") {
+    if (editors.size) setFocus("editor");
+    else setStatus("open a file to edit", "idle");
+  } else setFocus("terminal");
+}
+function toggleSidebar() {
+  document.body.classList.toggle("no-sidebar");
+}
+function togglePanel() {
+  if (document.body.dataset.focus !== "terminal") {
+    document.body.classList.toggle("no-panel");
+    if (activeEditor) renderMinimap(activeEditor);
+  }
+}
+panelMaxBtn.addEventListener("click", toggleFocus);
+
+// --- notifications (bell + dropdown) ----------------------------------------
+
+const notifs = [];
+let unread = 0;
+const NOTIF_ICONS = { tool: "▸", perm: "●", done: "✓", warn: "!", error: "✕", info: "·" };
+
+function notify(kind, text) {
+  notifs.unshift({ kind, text, t: Date.now() });
+  if (notifs.length > 60) notifs.pop();
+  if (notifEl.classList.contains("hidden")) {
+    unread++;
+    bellBadge.textContent = unread > 99 ? "99+" : String(unread);
+    bellBadge.classList.remove("hidden");
+    bellBtn.classList.add("has-unread");
+  }
+  renderNotifs();
+}
+function fmtTime(t) {
+  return new Date(t).toTimeString().slice(0, 8);
+}
+function renderNotifs() {
+  notifList.innerHTML = "";
+  if (!notifs.length) {
+    notifList.innerHTML = '<div class="notif-empty">No activity yet.</div>';
+    return;
+  }
+  for (const n of notifs) {
+    const row = document.createElement("div");
+    row.className = "notif-item k-" + n.kind;
+    const ic = document.createElement("span");
+    ic.className = "ni";
+    ic.textContent = NOTIF_ICONS[n.kind] || "·";
+    const tx = document.createElement("span");
+    tx.className = "nt";
+    tx.textContent = n.text;
+    const tm = document.createElement("span");
+    tm.className = "nm";
+    tm.textContent = fmtTime(n.t);
+    row.append(ic, tx, tm);
+    notifList.appendChild(row);
+  }
+}
+function closeNotif() {
+  notifEl.classList.add("hidden");
+}
+function toggleNotif() {
+  if (notifEl.classList.contains("hidden")) {
+    notifEl.classList.remove("hidden");
+    unread = 0;
+    bellBadge.classList.add("hidden");
+    bellBtn.classList.remove("has-unread");
+    renderNotifs();
+  } else closeNotif();
+}
+bellBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleNotif();
+});
+$("notif-clear").addEventListener("click", () => {
+  notifs.length = 0;
+  renderNotifs();
+});
+document.addEventListener("click", (e) => {
+  if (!notifEl.classList.contains("hidden") && !notifEl.contains(e.target) && e.target !== bellBtn)
+    closeNotif();
+});
+
+// --- keyboard shortcuts ------------------------------------------------------
+
+const SHORTCUTS = [
+  ["Ctrl/Cmd + Shift + P", "Command palette"],
+  ["Ctrl/Cmd + N", "New window"],
+  ["Ctrl/Cmd + `", "Toggle big terminal"],
+  ["Ctrl/Cmd + B", "Toggle explorer"],
+  ["Ctrl/Cmd + J", "Toggle bottom panel"],
+  ["Ctrl/Cmd + L", "Focus chat"],
+  ["Ctrl/Cmd + T", "New terminal"],
+  ["Ctrl/Cmd + W", "Close editor tab"],
+  ["Ctrl/Cmd + S", "Save file"],
+  ["Ctrl/Cmd + F", "Find in file"],
+  ["Ctrl/Cmd + /", "Shortcuts help"],
+  ["Esc", "Close overlay"],
+];
+const shortcutsOverlay = $("shortcuts");
+const scList = $("sc-list");
+function renderShortcuts() {
+  scList.innerHTML = "";
+  for (const [k, d] of SHORTCUTS) {
+    const r = document.createElement("div");
+    r.className = "sc-row";
+    const kk = document.createElement("kbd");
+    kk.textContent = k;
+    const dd = document.createElement("span");
+    dd.textContent = d;
+    r.append(kk, dd);
+    scList.appendChild(r);
+  }
+}
+function closeShortcuts() {
+  shortcutsOverlay.classList.add("hidden");
+}
+function toggleShortcuts() {
+  if (shortcutsOverlay.classList.contains("hidden")) {
+    renderShortcuts();
+    shortcutsOverlay.classList.remove("hidden");
+  } else closeShortcuts();
+}
+shortcutsOverlay.addEventListener("mousedown", (e) => {
+  if (e.target === shortcutsOverlay) closeShortcuts();
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeShortcuts();
+    closeNotif();
+    return;
+  }
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === "n" && !e.shiftKey) {
+    e.preventDefault();
+    invoke("new_window");
+  } else if (k === "`") {
+    e.preventDefault();
+    toggleFocus();
+  } else if (k === "b") {
+    e.preventDefault();
+    toggleSidebar();
+  } else if (k === "j") {
+    e.preventDefault();
+    togglePanel();
+  } else if (k === "l") {
+    e.preventDefault();
+    promptEl.focus();
+  } else if (k === "t" && !e.shiftKey) {
+    e.preventDefault();
+    showPanelTab("terminal");
+    newTerminal();
+  } else if (k === "w") {
+    if (activeEditor) {
+      e.preventDefault();
+      closeEditor(activeEditor);
+    }
+  } else if (k === "/") {
+    e.preventDefault();
+    toggleShortcuts();
+  }
+});
+
+// Extra palette commands for the new surfaces.
+COMMANDS.push(
+  { kind: "cmd", label: "Keyboard Shortcuts", run: toggleShortcuts },
+  { kind: "cmd", label: "Toggle Explorer", run: toggleSidebar },
+  { kind: "cmd", label: "Toggle Big Terminal", run: toggleFocus },
+  { kind: "cmd", label: "Toggle Bottom Panel", run: togglePanel },
+  { kind: "cmd", label: "Notifications", run: toggleNotif }
+);
+
 // --- init -------------------------------------------------------------------
 
 applyTheme(localStorage.getItem("ade-theme") || "dark");
@@ -909,8 +1116,10 @@ loadModels();
 loadTree();
 loadRoot();
 restoreChat();
-restoreTabs();
-showPanelTab("terminal");
+restoreTabs().finally(() => {
+  booting = false;
+});
+setFocus("terminal");
 promptEl.focus();
 
 // Repaint the previous conversation (user/assistant text) after a restart.

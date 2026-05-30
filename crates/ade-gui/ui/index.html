@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="vendor/cm/addon/dialog.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body data-theme="dark">
+  <body data-theme="dark" data-focus="terminal">
     <header class="topbar">
       <div class="brand"><span class="logo">◆</span> ADE</div>
       <label class="picker">
@@ -27,7 +27,20 @@
         <select id="model"></select>
       </label>
       <div id="status" class="status idle">ready</div>
-      <button id="new-window" class="ghost mini topbar-btn" title="New window">⧉</button>
+      <div class="bell-wrap">
+        <button id="bell" class="iconbtn" title="Activity (notifications)">
+          <span class="bell-ico">◔</span>
+          <span id="bell-badge" class="badge hidden">0</span>
+        </button>
+        <div id="notif" class="notif hidden">
+          <div class="notif-head">
+            <span>Activity</span>
+            <button id="notif-clear" class="ghost mini">Clear</button>
+          </div>
+          <div id="notif-list" class="notif-list"></div>
+        </div>
+      </div>
+      <button id="new-window" class="iconbtn topbar-btn" title="New window (Ctrl/Cmd+N)">⧉</button>
     </header>
 
     <div class="body">
@@ -67,6 +80,7 @@
                 <button id="preview-go" class="ghost mini">Go</button>
                 <button id="preview-reload" class="ghost mini" title="Reload">⟳</button>
               </span>
+              <button id="panel-max" class="ghost mini" title="Maximize terminal (Ctrl/Cmd+`)">⤢</button>
             </div>
           </div>
           <div class="panel-body">
@@ -108,6 +122,13 @@
       <span id="sb-model" class="sb-item">—</span>
       <span id="sb-root" class="sb-item sb-root">—</span>
     </footer>
+
+    <div id="shortcuts" class="palette hidden">
+      <div class="palette-box sc-box">
+        <div class="sc-head">Keyboard Shortcuts <span class="sc-esc">Esc</span></div>
+        <div id="sc-list" class="sc-list"></div>
+      </div>
+    </div>
 
     <div id="palette" class="palette hidden">
       <div class="palette-box">
