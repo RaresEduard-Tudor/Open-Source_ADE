@@ -93,6 +93,25 @@ button.ghost:hover { border-color: var(--accent); }
 button.ghost:disabled { color: var(--muted); cursor: default; }
 button.ghost.mini { padding: 2px 9px; }
 
+/* Editor tabs + CodeMirror */
+.editor-tabs { display: flex; gap: 1px; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; }
+.editor-tabs:empty { display: none; }
+.etab { display: flex; align-items: center; gap: 8px; padding: 6px 11px; font-size: 12.5px; color: var(--muted); background: var(--panel-2); cursor: pointer; white-space: nowrap; }
+.etab.active { color: var(--text); background: var(--bg); }
+.etab.dirty > span:first-child::after { content: " ●"; color: var(--tool); }
+.etab .x { opacity: 0.55; }
+.etab .x:hover { opacity: 1; color: var(--danger); }
+.cm-host { flex: 1; position: relative; min-height: 0; }
+.cm-wrap { position: absolute; inset: 0; }
+.cm-wrap.hidden { display: none; }
+.cm-empty { padding: 16px; color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+.cm-host .CodeMirror { height: 100%; font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+
+/* Diff (in chat tool results) */
+.diff { font-family: var(--mono); font-size: 12.5px; margin-top: 6px; white-space: pre; overflow: auto; max-height: 320px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--code-bg); }
+.diff .d-add { color: #56d364; } .diff .d-del { color: #f85149; }
+.diff .d-hunk { color: var(--accent); } .diff .d-ctx { color: var(--muted); }
+
 /* Bottom panel */
 .panel { height: var(--panel-h); display: flex; flex-direction: column; min-height: 80px; border-top: 1px solid var(--border); }
 .panel-tabs { display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--panel); border-bottom: 1px solid var(--border); }

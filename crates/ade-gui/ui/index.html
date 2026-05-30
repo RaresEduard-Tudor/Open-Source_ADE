@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ADE</title>
     <link rel="stylesheet" href="vendor/xterm.css" />
+    <link rel="stylesheet" href="vendor/cm/codemirror.css" />
+    <link rel="stylesheet" href="vendor/cm/theme/monokai.css" />
+    <link rel="stylesheet" href="vendor/cm/theme/material-darker.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body data-theme="dark">
@@ -37,12 +40,14 @@
       <!-- Center: editor + bottom panel -->
       <section class="center">
         <section class="editor">
+          <div id="editor-tabs" class="editor-tabs"></div>
           <div class="pane-head editor-head">
             <span id="editor-path">no file open</span>
             <button id="save" class="ghost" disabled>Save</button>
           </div>
-          <textarea id="code" class="code" spellcheck="false"
-            placeholder="Select a file from the explorer to view or edit it.   (Ctrl/Cmd+S to save)"></textarea>
+          <div id="cm-host" class="cm-host">
+            <div class="cm-empty">Select a file from the explorer.  (Ctrl/Cmd+S to save)</div>
+          </div>
         </section>
 
         <div class="splitter h" data-target="panel"></div>
@@ -100,6 +105,18 @@
 
     <script src="vendor/xterm.js"></script>
     <script src="vendor/xterm-addon-fit.js"></script>
+    <script src="vendor/cm/codemirror.js"></script>
+    <script src="vendor/cm/mode/xml.js"></script>
+    <script src="vendor/cm/mode/javascript.js"></script>
+    <script src="vendor/cm/mode/css.js"></script>
+    <script src="vendor/cm/mode/htmlmixed.js"></script>
+    <script src="vendor/cm/mode/clike.js"></script>
+    <script src="vendor/cm/mode/rust.js"></script>
+    <script src="vendor/cm/mode/python.js"></script>
+    <script src="vendor/cm/mode/markdown.js"></script>
+    <script src="vendor/cm/mode/shell.js"></script>
+    <script src="vendor/cm/mode/toml.js"></script>
+    <script src="vendor/cm/mode/yaml.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

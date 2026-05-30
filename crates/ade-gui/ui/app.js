@@ -9,14 +9,11 @@ const promptEl = $("prompt");
 const sendBtn = $("send");
 const statusEl = $("status");
 const treeEl = $("tree");
-const codeEl = $("code");
 const editorPathEl = $("editor-path");
 const saveBtn = $("save");
 const sbModel = $("sb-model");
 const sbRoot = $("sb-root");
 
-let openPath = null;
-let dirty = false;
 let liveAssistant = null; // element currently being streamed into
 
 // --- helpers ----------------------------------------------------------------
@@ -109,8 +106,35 @@ listen("tool-call", (e) => {
   addTool(e.payload.name, e.payload.summary);
 });
 
+function isDiff(text) {
+  return /\n@@ |\n--- |^@@ |^--- /.test(text) || text.includes("\n+") || text.includes("\n-");
+}
+function renderDiff(text) {
+  const pre = document.createElement("pre");
+  pre.className = "diff";
+  for (const line of text.split("\n")) {
+    const span = document.createElement("span");
+    const c = line[0];
+    span.className =
+      c === "+" ? "d-add" : c === "-" ? "d-del" : c === "@" ? "d-hunk" : "d-ctx";
+    span.textContent = line + "\n";
+    pre.appendChild(span);
+  }
+  return pre;
+}
+
 listen("tool-result", (e) => {
   const text = String(e.payload.result || "");
+  const name = e.payload.name || "";
+
+  // Colorized diff for file edits.
+  if ((name === "edit_file" || name === "write_file") && e.payload.ok && isDiff(text)) {
+    const tools = transcript.querySelectorAll(".tool");
+    (tools[tools.length - 1] || transcript).appendChild(renderDiff(text));
+    scrollDown();
+    return;
+  }
+
   const r = document.createElement("div");
   r.className = "result " + (e.payload.ok ? "ok" : "bad");
   const LIMIT = 500;
@@ -262,51 +286,156 @@ function loadTree() {
   loadChildren("", treeEl);
 }
 
-// --- editor -----------------------------------------------------------------
+// --- editor (CodeMirror tabs) -----------------------------------------------
 
-function setEditorPath(rel, isDirty) {
-  editorPathEl.innerHTML = (isDirty ? '<span class="dot">●</span>' : "") + (rel || "no file open");
+const editors = new Map(); // rel -> { cm, dirty, tabEl, wrap }
+let activeEditor = null;
+const cmHost = $("cm-host");
+const editorTabs = $("editor-tabs");
+
+const MODES = {
+  js: { name: "javascript" }, jsx: { name: "javascript" }, mjs: { name: "javascript" },
+  ts: { name: "javascript", typescript: true }, tsx: { name: "javascript", typescript: true },
+  json: { name: "javascript", json: true },
+  rs: "rust", py: "python", css: "css", scss: "css",
+  html: "htmlmixed", htm: "htmlmixed", xml: "xml", svg: "xml",
+  md: "markdown", markdown: "markdown",
+  sh: "shell", bash: "shell", zsh: "shell",
+  toml: "toml", yaml: "yaml", yml: "yaml",
+  c: "text/x-csrc", h: "text/x-csrc", cpp: "text/x-c++src", hpp: "text/x-c++src",
+};
+function modeFor(rel) {
+  const ext = rel.split(".").pop().toLowerCase();
+  return MODES[ext] || null;
 }
+function cmTheme() {
+  const t = document.body.dataset.theme;
+  return t === "light" ? "default" : t === "monokai" ? "monokai" : "material-darker";
+}
+function setEditorPath() {
+  const e = editors.get(activeEditor);
+  editorPathEl.innerHTML =
+    (e && e.dirty ? '<span class="dot">●</span>' : "") + (activeEditor || "no file open");
+  saveBtn.disabled = !(e && e.dirty);
+}
+
 async function openFile(rel) {
+  if (editors.has(rel)) return selectEditor(rel);
+  let text;
   try {
-    const text = await invoke("read_file_text", { rel });
-    codeEl.value = text;
-    openPath = rel;
-    dirty = false;
-    saveBtn.disabled = true;
-    setEditorPath(rel, false);
+    text = await invoke("read_file_text", { rel });
   } catch (e) {
-    setEditorPath(rel + " — " + e, false);
-    codeEl.value = "";
-    openPath = null;
+    editorPathEl.textContent = rel + " — " + e;
+    return;
+  }
+  const emptyMsg = cmHost.querySelector(".cm-empty");
+  if (emptyMsg) emptyMsg.remove();
+
+  const wrap = document.createElement("div");
+  wrap.className = "cm-wrap";
+  cmHost.appendChild(wrap);
+  const cm = CodeMirror(wrap, {
+    value: text,
+    mode: modeFor(rel),
+    theme: cmTheme(),
+    lineNumbers: true,
+    lineWrapping: false,
+  });
+  cm.on("change", () => markDirty(rel));
+
+  const tabEl = document.createElement("div");
+  tabEl.className = "etab";
+  const name = document.createElement("span");
+  name.textContent = rel.split("/").pop();
+  const x = document.createElement("span");
+  x.className = "x";
+  x.textContent = "✕";
+  x.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    closeEditor(rel);
+  });
+  tabEl.append(name, x);
+  tabEl.addEventListener("click", () => selectEditor(rel));
+  editorTabs.appendChild(tabEl);
+
+  editors.set(rel, { cm, dirty: false, tabEl, wrap });
+  selectEditor(rel);
+}
+
+function selectEditor(rel) {
+  activeEditor = rel;
+  for (const [r, ed] of editors) {
+    const on = r === rel;
+    ed.wrap.classList.toggle("hidden", !on);
+    ed.tabEl.classList.toggle("active", on);
+    if (on) {
+      ed.cm.refresh();
+      ed.cm.focus();
+    }
+  }
+  setEditorPath();
+}
+
+function markDirty(rel) {
+  const ed = editors.get(rel);
+  if (!ed || ed.dirty) return;
+  ed.dirty = true;
+  ed.tabEl.classList.add("dirty");
+  if (rel === activeEditor) setEditorPath();
+}
+
+function closeEditor(rel) {
+  const ed = editors.get(rel);
+  if (!ed) return;
+  ed.wrap.remove();
+  ed.tabEl.remove();
+  editors.delete(rel);
+  if (activeEditor === rel) {
+    activeEditor = null;
+    const next = editors.keys().next();
+    if (!next.done) selectEditor(next.value);
+    else {
+      cmHost.innerHTML = '<div class="cm-empty">Select a file from the explorer.</div>';
+      setEditorPath();
+    }
   }
 }
+
+async function saveActive() {
+  const ed = editors.get(activeEditor);
+  if (!ed || !ed.dirty) return;
+  try {
+    await invoke("save_file_text", { rel: activeEditor, content: ed.cm.getValue() });
+    ed.dirty = false;
+    ed.tabEl.classList.remove("dirty");
+    setEditorPath();
+  } catch (e) {
+    editorPathEl.textContent = activeEditor + " — save failed: " + e;
+  }
+}
+
+// Reload open, unmodified files after the agent may have changed them.
 async function reloadOpenFile() {
-  if (openPath && !dirty) await openFile(openPath);
-}
-async function saveFile() {
-  if (!openPath || !dirty) return;
-  try {
-    await invoke("save_file_text", { rel: openPath, content: codeEl.value });
-    dirty = false;
-    saveBtn.disabled = true;
-    setEditorPath(openPath, false);
-  } catch (e) {
-    setEditorPath(openPath + " — save failed: " + e, true);
+  for (const [rel, ed] of editors) {
+    if (ed.dirty) continue;
+    try {
+      const text = await invoke("read_file_text", { rel });
+      if (text !== ed.cm.getValue()) {
+        const pos = ed.cm.getCursor();
+        ed.cm.setValue(text);
+        ed.cm.setCursor(pos);
+        ed.dirty = false;
+        ed.tabEl.classList.remove("dirty");
+      }
+    } catch {}
   }
 }
-codeEl.addEventListener("input", () => {
-  if (openPath && !dirty) {
-    dirty = true;
-    saveBtn.disabled = false;
-    setEditorPath(openPath, true);
-  }
-});
-saveBtn.addEventListener("click", saveFile);
+
+saveBtn.addEventListener("click", saveActive);
 window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
     e.preventDefault();
-    saveFile();
+    saveActive();
   }
 });
 
@@ -394,6 +523,7 @@ function applyTheme(name) {
     foreground: css.getPropertyValue("--text").trim(),
   };
   for (const t of terminals.values()) t.term.options.theme = theme;
+  for (const ed of editors.values()) ed.cm.setOption("theme", cmTheme());
 }
 themeSel.addEventListener("change", () => applyTheme(themeSel.value));
 

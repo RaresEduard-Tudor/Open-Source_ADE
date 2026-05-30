@@ -28,6 +28,21 @@ fn arg_str<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| Error::Tool(format!("missing string arg '{key}'")))
 }
 
+/// Unified diff of a file change, capped so huge rewrites don't flood context.
+fn unified_diff(old: &str, new: &str, path: &str) -> String {
+    let mut out = similar::TextDiff::from_lines(old, new)
+        .unified_diff()
+        .context_radius(3)
+        .header(&format!("a/{path}"), &format!("b/{path}"))
+        .to_string();
+    const CAP: usize = 6000;
+    if out.len() > CAP {
+        out.truncate(CAP);
+        out.push_str("\n… (diff truncated)");
+    }
+    out
+}
+
 // ---- read_file -------------------------------------------------------------
 
 struct ReadFile;
@@ -173,13 +188,17 @@ impl Tool for WriteFile {
         format!("write_file {}", args["path"].as_str().unwrap_or("?"))
     }
     async fn execute(&self, args: &Value, ctx: &ToolContext) -> Result<String> {
-        let path = safe_join(&ctx.root, arg_str(args, "path")?)?;
+        let rel = arg_str(args, "path")?;
+        let path = safe_join(&ctx.root, rel)?;
         let content = arg_str(args, "content")?;
+        let old = std::fs::read_to_string(&path).unwrap_or_default();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&path, content)?;
-        Ok(format!("wrote {} bytes to {}", content.len(), arg_str(args, "path")?))
+        let diff = unified_diff(&old, content, rel);
+        let verb = if old.is_empty() { "created" } else { "wrote" };
+        Ok(format!("{verb} {rel} ({} bytes)\n{diff}", content.len()))
     }
 }
 
@@ -226,7 +245,8 @@ impl Tool for EditFile {
         }
         let updated = text.replacen(old, new, 1);
         std::fs::write(&path, &updated)?;
-        Ok(format!("edited {rel}"))
+        let diff = unified_diff(&text, &updated, rel);
+        Ok(format!("edited {rel}\n{diff}"))
     }
 }
 
