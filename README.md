@@ -76,8 +76,9 @@ Workspace, lib-first so a future GUI shares the core. Built for a tiny binary
 
 ## Status
 
-MVP: multi-model agent loop, built-in tools, permission gate, shared MCP (stdio)
-and skills, sessions. Planned: streaming, MCP SSE transport, Tauri GUI.
+MVP: multi-model agent loop with **streaming** responses, built-in tools,
+permission gate, shared MCP (stdio) and skills, sessions. Planned: MCP SSE
+transport, Tauri GUI.
 
 ## License
 

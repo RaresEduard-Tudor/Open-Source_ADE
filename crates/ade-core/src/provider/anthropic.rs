@@ -4,11 +4,13 @@
 //! assistant turns and results are `tool_result` blocks inside a *user* turn.
 //! Consecutive tool results coalesce into one user message.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use super::types::*;
-use super::Provider;
+use super::{sse, Provider, TextSink};
 use crate::config::ProviderConfig;
 use crate::error::{Error, Result};
 
@@ -183,6 +185,109 @@ impl Provider for AnthropicAdapter {
         }
         let v: Value = serde_json::from_str(&body)?;
         parse_response(&v)
+    }
+
+    async fn stream(&self, req: &ChatRequest, sink: &mut TextSink<'_>) -> Result<ChatResponse> {
+        let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+        let mut body = build_body(req);
+        body["model"] = json!(self.model);
+        body["stream"] = json!(true);
+
+        let mut rb = self
+            .client
+            .post(&url)
+            .header("anthropic-version", API_VERSION)
+            .json(&body);
+        if let Some(key) = &self.api_key {
+            rb = rb.header("x-api-key", key);
+        }
+        let resp = rb
+            .send()
+            .await
+            .map_err(|e| Error::Provider(format!("anthropic stream request: {e}")))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(Error::Provider(format!("anthropic {status}: {body}")));
+        }
+
+        let mut content = String::new();
+        // block index -> (id, name, accumulated partial json)
+        let mut tool_blocks: BTreeMap<u64, (String, String, String)> = BTreeMap::new();
+        let mut finish = FinishReason::Stop;
+        let mut usage = Usage::default();
+
+        sse::for_each_data(resp, |data| {
+            let v: Value = serde_json::from_str(data)
+                .map_err(|e| Error::Provider(format!("anthropic stream json: {e}")))?;
+            match v["type"].as_str() {
+                Some("message_start") => {
+                    usage.input_tokens =
+                        v["message"]["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
+                }
+                Some("content_block_start") => {
+                    let idx = v["index"].as_u64().unwrap_or(0);
+                    let block = &v["content_block"];
+                    if block["type"] == "tool_use" {
+                        tool_blocks.insert(
+                            idx,
+                            (
+                                block["id"].as_str().unwrap_or_default().to_string(),
+                                block["name"].as_str().unwrap_or_default().to_string(),
+                                String::new(),
+                            ),
+                        );
+                    }
+                }
+                Some("content_block_delta") => {
+                    let delta = &v["delta"];
+                    match delta["type"].as_str() {
+                        Some("text_delta") => {
+                            if let Some(t) = delta["text"].as_str() {
+                                content.push_str(t);
+                                sink(t);
+                            }
+                        }
+                        Some("input_json_delta") => {
+                            let idx = v["index"].as_u64().unwrap_or(0);
+                            if let Some(entry) = tool_blocks.get_mut(&idx) {
+                                entry.2.push_str(delta["partial_json"].as_str().unwrap_or(""));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Some("message_delta") => {
+                    if let Some(sr) = v["delta"]["stop_reason"].as_str() {
+                        finish = match sr {
+                            "tool_use" => FinishReason::ToolCalls,
+                            "max_tokens" => FinishReason::Length,
+                            _ => FinishReason::Stop,
+                        };
+                    }
+                    if let Some(o) = v["usage"]["output_tokens"].as_u64() {
+                        usage.output_tokens = o as u32;
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        })
+        .await?;
+
+        let tool_calls: Vec<ToolCall> = tool_blocks
+            .into_values()
+            .map(|(id, name, args)| ToolCall {
+                id,
+                name,
+                arguments: serde_json::from_str(&args).unwrap_or(json!({})),
+            })
+            .collect();
+        if !tool_calls.is_empty() {
+            finish = FinishReason::ToolCalls;
+        }
+
+        Ok(ChatResponse { content, tool_calls, finish, usage })
     }
 }
 

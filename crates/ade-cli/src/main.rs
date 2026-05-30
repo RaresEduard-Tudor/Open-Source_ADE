@@ -359,8 +359,12 @@ struct CliReporter {
 }
 
 impl Reporter for CliReporter {
-    fn on_assistant(&self, text: &str) {
-        println!("{text}");
+    fn on_assistant_delta(&self, text: &str) {
+        print!("{text}");
+        io::stdout().flush().ok();
+    }
+    fn on_assistant_end(&self) {
+        println!();
     }
     fn on_tool_call(&self, name: &str, summary: &str) {
         println!("  ▸ {name}: {summary}");

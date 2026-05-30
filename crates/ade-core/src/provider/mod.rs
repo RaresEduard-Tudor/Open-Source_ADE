@@ -9,6 +9,10 @@ pub mod types;
 mod anthropic;
 mod gemini;
 mod openai;
+mod sse;
+
+/// Receives streamed text deltas as they arrive.
+pub type TextSink<'a> = dyn FnMut(&str) + Send + 'a;
 
 use async_trait::async_trait;
 
@@ -25,6 +29,18 @@ pub trait Provider: Send + Sync {
     fn name(&self) -> &str;
     /// Single non-streaming completion.
     async fn complete(&self, req: &ChatRequest) -> Result<ChatResponse>;
+    /// Streaming completion: text deltas are passed to `sink` as they arrive;
+    /// the assembled [`ChatResponse`] (full text + tool calls) is returned.
+    ///
+    /// The default implementation falls back to [`Provider::complete`] and emits
+    /// the whole text at once, so adapters without streaming still work.
+    async fn stream(&self, req: &ChatRequest, sink: &mut TextSink<'_>) -> Result<ChatResponse> {
+        let resp = self.complete(req).await?;
+        if !resp.content.is_empty() {
+            sink(&resp.content);
+        }
+        Ok(resp)
+    }
 }
 
 /// Build a live provider from its config, resolving the API key.

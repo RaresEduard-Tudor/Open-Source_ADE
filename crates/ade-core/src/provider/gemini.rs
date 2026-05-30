@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use super::types::*;
-use super::Provider;
+use super::{sse, Provider, TextSink};
 use crate::config::ProviderConfig;
 use crate::error::{Error, Result};
 
@@ -169,6 +169,70 @@ impl Provider for GeminiAdapter {
         }
         let v: Value = serde_json::from_str(&body)?;
         parse_response(&v)
+    }
+
+    async fn stream(&self, req: &ChatRequest, sink: &mut TextSink<'_>) -> Result<ChatResponse> {
+        let key = self
+            .api_key
+            .as_deref()
+            .ok_or_else(|| Error::Provider("gemini: api_key required".into()))?;
+        let url = format!(
+            "{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
+            self.base_url.trim_end_matches('/'),
+            self.model,
+            key
+        );
+        let resp = self
+            .client
+            .post(&url)
+            .json(&build_body(req))
+            .send()
+            .await
+            .map_err(|e| Error::Provider(format!("gemini stream request: {e}")))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(Error::Provider(format!("gemini {status}: {body}")));
+        }
+
+        let mut content = String::new();
+        let mut tool_calls = Vec::new();
+        let mut finish = FinishReason::Stop;
+        let mut usage = Usage::default();
+
+        sse::for_each_data(resp, |data| {
+            let v: Value = serde_json::from_str(data)
+                .map_err(|e| Error::Provider(format!("gemini stream json: {e}")))?;
+            if let Some(u) = v.get("usageMetadata").filter(|u| !u.is_null()) {
+                usage.input_tokens = u["promptTokenCount"].as_u64().unwrap_or(0) as u32;
+                usage.output_tokens = u["candidatesTokenCount"].as_u64().unwrap_or(0) as u32;
+            }
+            let Some(cand) = v["candidates"].get(0) else { return Ok(()) };
+            if let Some(parts) = cand["content"]["parts"].as_array() {
+                for p in parts {
+                    if let Some(t) = p["text"].as_str() {
+                        if !t.is_empty() {
+                            content.push_str(t);
+                            sink(t);
+                        }
+                    }
+                    if let Some(fc) = p.get("functionCall").filter(|fc| !fc.is_null()) {
+                        let name = fc["name"].as_str().unwrap_or_default().to_string();
+                        tool_calls.push(ToolCall { id: name.clone(), name, arguments: fc["args"].clone() });
+                    }
+                }
+            }
+            if cand["finishReason"].as_str() == Some("MAX_TOKENS") {
+                finish = FinishReason::Length;
+            }
+            Ok(())
+        })
+        .await?;
+
+        if !tool_calls.is_empty() {
+            finish = FinishReason::ToolCalls;
+        }
+        Ok(ChatResponse { content, tool_calls, finish, usage })
     }
 }
 

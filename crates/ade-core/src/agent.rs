@@ -16,7 +16,10 @@ use crate::tools::{ToolContext, ToolRegistry};
 /// Observes agent activity for display. The CLI implements this to print
 /// assistant text, tool calls, diffs, and denials.
 pub trait Reporter: Send + Sync {
-    fn on_assistant(&self, _text: &str) {}
+    /// A chunk of assistant text as it streams in.
+    fn on_assistant_delta(&self, _text: &str) {}
+    /// The assistant's text for this step has finished streaming.
+    fn on_assistant_end(&self) {}
     fn on_tool_call(&self, _name: &str, _summary: &str) {}
     fn on_tool_result(&self, _name: &str, _result: &str, _ok: bool) {}
     fn on_denied(&self, _name: &str, _summary: &str) {}
@@ -53,11 +56,14 @@ impl<'a> Agent<'a> {
             req.messages = session.messages.clone();
             req.tools = self.registry.specs();
 
-            let resp = self.provider.complete(&req).await?;
+            let resp = {
+                let mut sink = |delta: &str| reporter.on_assistant_delta(delta);
+                self.provider.stream(&req, &mut sink).await?
+            };
             session.push(resp.to_message());
 
             if !resp.content.is_empty() {
-                reporter.on_assistant(&resp.content);
+                reporter.on_assistant_end();
             }
             if resp.tool_calls.is_empty() {
                 return Ok(resp.content);

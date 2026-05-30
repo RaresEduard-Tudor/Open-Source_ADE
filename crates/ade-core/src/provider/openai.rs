@@ -2,11 +2,13 @@
 //!
 //! Covers OpenAI, Deepseek, Mimo, local servers, and most OSS endpoints.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use super::types::*;
-use super::Provider;
+use super::{sse, Provider, TextSink};
 use crate::config::ProviderConfig;
 use crate::error::{Error, Result};
 
@@ -177,6 +179,88 @@ impl Provider for OpenAiAdapter {
         }
         let v: Value = serde_json::from_str(&body)?;
         parse_response(&v)
+    }
+
+    async fn stream(&self, req: &ChatRequest, sink: &mut TextSink<'_>) -> Result<ChatResponse> {
+        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
+        let mut body = build_body(req);
+        body["model"] = json!(self.model);
+        body["stream"] = json!(true);
+        body["stream_options"] = json!({"include_usage": true});
+
+        let mut rb = self.client.post(&url).json(&body);
+        if let Some(key) = &self.api_key {
+            rb = rb.bearer_auth(key);
+        }
+        let resp = rb
+            .send()
+            .await
+            .map_err(|e| Error::Provider(format!("openai stream request: {e}")))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(Error::Provider(format!("openai {status}: {body}")));
+        }
+
+        let mut content = String::new();
+        // index -> (id, name, accumulated argument string)
+        let mut calls: BTreeMap<u64, (String, String, String)> = BTreeMap::new();
+        let mut finish = FinishReason::Stop;
+        let mut usage = Usage::default();
+
+        sse::for_each_data(resp, |data| {
+            let v: Value = serde_json::from_str(data)
+                .map_err(|e| Error::Provider(format!("openai stream json: {e}")))?;
+            if let Some(u) = v.get("usage").filter(|u| !u.is_null()) {
+                usage.input_tokens = u["prompt_tokens"].as_u64().unwrap_or(0) as u32;
+                usage.output_tokens = u["completion_tokens"].as_u64().unwrap_or(0) as u32;
+            }
+            let Some(choice) = v["choices"].get(0) else { return Ok(()) };
+            let delta = &choice["delta"];
+            if let Some(c) = delta["content"].as_str() {
+                if !c.is_empty() {
+                    content.push_str(c);
+                    sink(c);
+                }
+            }
+            if let Some(tcs) = delta["tool_calls"].as_array() {
+                for tc in tcs {
+                    let idx = tc["index"].as_u64().unwrap_or(0);
+                    let entry = calls.entry(idx).or_default();
+                    if let Some(id) = tc["id"].as_str() {
+                        entry.0 = id.to_string();
+                    }
+                    if let Some(name) = tc["function"]["name"].as_str() {
+                        entry.1.push_str(name);
+                    }
+                    if let Some(args) = tc["function"]["arguments"].as_str() {
+                        entry.2.push_str(args);
+                    }
+                }
+            }
+            match choice["finish_reason"].as_str() {
+                Some("tool_calls") => finish = FinishReason::ToolCalls,
+                Some("length") => finish = FinishReason::Length,
+                Some("stop") => finish = FinishReason::Stop,
+                _ => {}
+            }
+            Ok(())
+        })
+        .await?;
+
+        let tool_calls: Vec<ToolCall> = calls
+            .into_values()
+            .map(|(id, name, args)| ToolCall {
+                id,
+                name,
+                arguments: serde_json::from_str(&args).unwrap_or(json!({})),
+            })
+            .collect();
+        if !tool_calls.is_empty() {
+            finish = FinishReason::ToolCalls;
+        }
+
+        Ok(ChatResponse { content, tool_calls, finish, usage })
     }
 }
 
