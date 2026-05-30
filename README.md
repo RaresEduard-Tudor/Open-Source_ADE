@@ -88,11 +88,17 @@ Then run it (WSLg shows the window automatically):
 cargo run -p ade-gui
 ```
 
-VSCode-style layout: resizable Explorer, editor (Ctrl/Cmd+S save), a bottom panel
-with **integrated terminals** (real PTYs via xterm.js) and a **Preview** tab
-(loads a running dev server / URL in an iframe), and the agent chat docked on the
-right with markdown rendering and in-app permission prompts (Allow / Always /
-Deny). Three switchable **themes** (Dark+, Light, Monokai). Built-in tools,
+**Terminal-first** layout: a big integrated terminal (real PTYs via xterm.js) is
+the centerpiece on launch — `cd` into a project and work — and drops to a small
+bottom panel the moment you open a file (toggle with ⤢ or Ctrl/Cmd+`). Alongside
+it: a resizable Explorer, the editor (Ctrl/Cmd+S save), a **Preview** tab (loads
+a dev server / URL in an iframe), and the agent chat docked on the right with
+markdown rendering and in-app permission prompts (Allow / Always / Deny). An
+**activity bell** in the topbar aggregates agent actions, tool calls, and
+permission requests so the chat stays uncluttered, and a **command palette** plus
+**keyboard shortcuts** (Ctrl/Cmd+/ for the cheat sheet) drive everything. Open a
+**second window** (⧉ / Ctrl/Cmd+N) for an isolated terminal + conversation on the
+same project. Three switchable **themes** (Dark+, Light, Monokai). Built-in tools,
 skills, and shared MCP servers — the same core as the CLI. The editor has tabs,
 syntax highlighting (CodeMirror), a **minimap**, find (Ctrl/Cmd+F), and a
 command palette (Ctrl/Cmd+Shift+P); agent file edits show as colorized diffs in
