@@ -85,8 +85,10 @@ Then run it (WSLg shows the window automatically):
 cargo run -p ade-gui
 ```
 
-Thin-slice scope: streaming chat with built-in tools + skills, mutating actions
-auto-approved. Planned: in-GUI permission prompts, file tree, editor pane, MCP.
+Features: three-pane VSCode-style layout (file tree | editor | streaming chat),
+in-app permission prompts (Allow / Always / Deny), built-in tools, skills, and
+shared MCP servers — the same core as the CLI. Planned: syntax highlighting,
+diff view, multi-window.
 
 ## Architecture
 

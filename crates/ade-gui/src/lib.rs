@@ -19,6 +19,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use ade_core::agent::{Agent, Reporter};
 use ade_core::config::Config;
+use ade_core::mcp::McpHost;
 use ade_core::permission::{ApprovalRequest, Approver, Decision, PermissionGate};
 use ade_core::provider;
 use ade_core::session::Session;
@@ -32,6 +33,12 @@ struct AppState {
     cfg: Config,
     cwd: PathBuf,
     session: Mutex<Session>,
+    /// Built once: built-in tools + skills + shared MCP tools.
+    registry: ToolRegistry,
+    /// System prompt (includes skill advertisements), built once.
+    system: String,
+    /// Keeps the shared MCP servers alive for the process lifetime.
+    _mcp: McpHost,
     /// In-flight permission requests: id -> reply channel.
     pending: Mutex<HashMap<u64, mpsc::Sender<u8>>>,
     next_perm_id: AtomicU64,
@@ -185,26 +192,11 @@ async fn send_prompt(
 ) -> Result<String, String> {
     let state = app.state::<AppState>();
 
-    // Build a fresh runtime per turn (cheap): builtins + skills, auto-approve.
-    let mut registry = ToolRegistry::with_builtins();
-    let skills = std::sync::Arc::new(SkillRegistry::discover(&state.cwd));
-    skills.register_tool(&mut registry);
-
     let gate = PermissionGate::new(
         state.cfg.permission.allow.clone(),
         Box::new(GuiApprover { app: app.clone() }),
     );
     let ctx = ToolContext { root: state.cwd.clone() };
-
-    let mut system = format!(
-        "You are an agent running inside ADE in the project at {}. \
-         Use the provided tools to read, edit, and run code. Be concise.",
-        state.cwd.display()
-    );
-    if let Some(sk) = skills.system_prompt() {
-        system.push_str("\n\n");
-        system.push_str(&sk);
-    }
 
     let providerb =
         provider::build(state.cfg.select_provider(model.as_deref()).map_err(|e| e.to_string())?)
@@ -216,10 +208,10 @@ async fn send_prompt(
     let reporter = GuiReporter { app: app.clone() };
     let agent = Agent {
         provider: providerb.as_ref(),
-        registry: &registry,
+        registry: &state.registry, // shared: builtins + skills + MCP
         gate: &gate,
         ctx: &ctx,
-        system: Some(system),
+        system: Some(state.system.clone()),
         max_iters: 25,
     };
     let result = agent.run_turn(&mut session, &prompt, &reporter).await;
@@ -234,11 +226,31 @@ pub fn run() {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let cfg = Config::load(&cwd).unwrap_or_default();
 
+    // Build the shared tool registry once: built-ins + skills + MCP servers
+    // (spawned a single time and shared across every turn and model).
+    let mut registry = ToolRegistry::with_builtins();
+    let mcp = McpHost::start(&cfg.mcp, &mut registry);
+    let skills = std::sync::Arc::new(SkillRegistry::discover(&cwd));
+    skills.register_tool(&mut registry);
+
+    let mut system = format!(
+        "You are an agent running inside ADE in the project at {}. \
+         Use the provided tools to read, edit, and run code. Be concise.",
+        cwd.display()
+    );
+    if let Some(sk) = skills.system_prompt() {
+        system.push_str("\n\n");
+        system.push_str(&sk);
+    }
+
     tauri::Builder::default()
         .manage(AppState {
             cfg,
             cwd,
             session: Mutex::new(Session::new()),
+            registry,
+            system,
+            _mcp: mcp,
             pending: Mutex::new(HashMap::new()),
             next_perm_id: AtomicU64::new(1),
             session_allow: Mutex::new(HashSet::new()),
