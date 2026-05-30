@@ -20,3 +20,4 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 portable-pty = "0.8"
+notify = { version = "6", default-features = false, features = ["macos_fsevent"] }

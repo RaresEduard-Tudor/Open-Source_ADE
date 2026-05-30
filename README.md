@@ -93,9 +93,13 @@ with **integrated terminals** (real PTYs via xterm.js) and a **Preview** tab
 (loads a running dev server / URL in an iframe), and the agent chat docked on the
 right with markdown rendering and in-app permission prompts (Allow / Always /
 Deny). Three switchable **themes** (Dark+, Light, Monokai). Built-in tools,
-skills, and shared MCP servers — the same core as the CLI. The editor has tabs
-and syntax highlighting (CodeMirror), and agent file edits show as colorized
-diffs in the chat. Planned: search, command palette.
+skills, and shared MCP servers — the same core as the CLI. The editor has tabs,
+syntax highlighting (CodeMirror), a **minimap**, find (Ctrl/Cmd+F), and a
+command palette (Ctrl/Cmd+Shift+P); agent file edits show as colorized diffs in
+the chat. A **file-system watcher** auto-reloads open files when the agent,
+terminal, or an external editor changes them on disk. Open tabs and the
+conversation **persist across restarts** (New chat clears it), and **New window**
+(⧉) opens a second window on the same project for side-by-side work.
 
 ### Platforms
 

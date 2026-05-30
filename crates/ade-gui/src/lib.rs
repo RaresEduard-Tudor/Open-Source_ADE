@@ -16,8 +16,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
 
+use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use ade_core::agent::{Agent, Reporter};
 use ade_core::config::Config;
@@ -35,6 +36,8 @@ pub(crate) struct AppState {
     cfg: Config,
     pub(crate) cwd: PathBuf,
     session: Mutex<Session>,
+    /// JSONL file the conversation is persisted to (survives restarts).
+    session_path: PathBuf,
     /// Built once: built-in tools + skills + shared MCP tools.
     registry: ToolRegistry,
     /// System prompt (includes skill advertisements), built once.
@@ -269,7 +272,9 @@ async fn send_prompt(
 
     match outcome {
         Some(r) => {
-            // Persist updated history back into shared state.
+            // Persist updated history into shared state and to disk so the
+            // conversation survives a restart.
+            let _ = session.save(&state.session_path);
             *state.session.lock().unwrap() = session;
             r
         }
@@ -281,6 +286,85 @@ async fn send_prompt(
 #[tauri::command]
 fn stop(state: State<AppState>) {
     state.cancel.notify_waiters();
+}
+
+#[derive(Serialize)]
+struct ChatTurn {
+    role: String,
+    content: String,
+}
+
+/// User/assistant text from the restored conversation, for repainting the chat
+/// on startup. Tool calls and results are omitted (history, not live activity).
+#[tauri::command]
+fn session_history(state: State<AppState>) -> Vec<ChatTurn> {
+    use ade_core::provider::Role;
+    state
+        .session
+        .lock()
+        .unwrap()
+        .messages
+        .iter()
+        .filter_map(|m| match m.role {
+            Role::User if !m.content.is_empty() => {
+                Some(ChatTurn { role: "user".into(), content: m.content.clone() })
+            }
+            Role::Assistant if !m.content.is_empty() => {
+                Some(ChatTurn { role: "assistant".into(), content: m.content.clone() })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Wipe the conversation (in memory and on disk). Frontend clears its own
+/// transcript log separately.
+#[tauri::command]
+fn clear_session(state: State<AppState>) {
+    *state.session.lock().unwrap() = Session::new();
+    let _ = std::fs::remove_file(&state.session_path);
+}
+
+/// Open another window on the same project (side-by-side editing).
+#[tauri::command]
+fn new_window(app: AppHandle) -> Result<(), String> {
+    let label = format!("w{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0));
+    WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
+        .title("ADE")
+        .inner_size(1200.0, 800.0)
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Watch the project tree and tell the webview to refresh when files change
+/// underneath it (agent edits, terminal commands, external editors). Build and
+/// VCS dirs are filtered out; the frontend debounces and reloads.
+fn spawn_fs_watcher(app: AppHandle, root: PathBuf) {
+    let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let Ok(ev) = res else { return };
+        let relevant = ev.paths.iter().any(|p| {
+            !p.components().any(|c| {
+                matches!(
+                    c.as_os_str().to_str(),
+                    Some(".git") | Some("target") | Some("node_modules") | Some(".ade")
+                )
+            })
+        });
+        if relevant {
+            let _ = app.emit("fs-changed", ());
+        }
+    }) {
+        Ok(w) => w,
+        Err(_) => return,
+    };
+    if watcher.watch(&root, RecursiveMode::Recursive).is_ok() {
+        // Keep the watcher alive for the lifetime of the process.
+        std::mem::forget(watcher);
+    }
 }
 
 /// Tauri entry point.
@@ -305,11 +389,17 @@ pub fn run() {
         system.push_str(&sk);
     }
 
+    // Resume the previous conversation if one was saved.
+    let session_path = Session::dir(&cwd).join("gui.jsonl");
+    let session = Session::load(&session_path).unwrap_or_default();
+    let watch_root = cwd.clone();
+
     tauri::Builder::default()
         .manage(AppState {
             cfg,
             cwd,
-            session: Mutex::new(Session::new()),
+            session: Mutex::new(session),
+            session_path,
             registry,
             system,
             _mcp: mcp,
@@ -319,6 +409,10 @@ pub fn run() {
             cancel: tokio::sync::Notify::new(),
         })
         .manage(terminal::Terminals::default())
+        .setup(move |app| {
+            spawn_fs_watcher(app.handle().clone(), watch_root);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_models,
             send_prompt,
@@ -329,6 +423,9 @@ pub fn run() {
             project_root,
             list_files,
             stop,
+            session_history,
+            clear_session,
+            new_window,
             terminal::term_open,
             terminal::term_input,
             terminal::term_resize,

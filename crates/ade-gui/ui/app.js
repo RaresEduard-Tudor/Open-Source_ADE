@@ -14,6 +14,12 @@ const editorPathEl = $("editor-path");
 const saveBtn = $("save");
 const sbModel = $("sb-model");
 const sbRoot = $("sb-root");
+const newWindowBtn = $("new-window");
+const clearChatBtn = $("clear-chat");
+
+const EMPTY_HTML =
+  '<div class="empty" id="empty"><div class="empty-logo">◆</div>' +
+  "<p>Bring your own key. Pick a model.<br />Ask the agent to read, edit, or run code.</p></div>";
 
 let liveAssistant = null; // element currently being streamed into
 
@@ -194,6 +200,23 @@ listen("permission-request", (e) => {
   scrollDown();
 });
 
+// --- file-system watch (auto-reload) ----------------------------------------
+
+// Backend emits `fs-changed` when files under the project change (agent edits,
+// terminal commands, external editors). Debounce, then reload open files.
+let fsTimer = null;
+listen("fs-changed", () => {
+  clearTimeout(fsTimer);
+  fsTimer = setTimeout(() => {
+    reloadOpenFile();
+    if (activeEditor) scheduleMinimap(activeEditor);
+  }, 250);
+});
+
+window.addEventListener("resize", () => {
+  if (activeEditor) renderMinimap(activeEditor);
+});
+
 // --- model list + status bar ------------------------------------------------
 
 async function loadModels() {
@@ -333,7 +356,7 @@ async function openFile(rel) {
   if (emptyMsg) emptyMsg.remove();
 
   const wrap = document.createElement("div");
-  wrap.className = "cm-wrap";
+  wrap.className = "cm-wrap has-map";
   cmHost.appendChild(wrap);
   const cm = CodeMirror(wrap, {
     value: text,
@@ -342,7 +365,25 @@ async function openFile(rel) {
     lineNumbers: true,
     lineWrapping: false,
   });
-  cm.on("change", () => markDirty(rel));
+
+  // Minimap: a canvas overview + a draggable viewport box on the right edge.
+  const map = document.createElement("canvas");
+  map.className = "minimap";
+  const view = document.createElement("div");
+  view.className = "minimap-view";
+  wrap.append(map, view);
+  map.addEventListener("click", (e) => {
+    const r = map.getBoundingClientRect();
+    const frac = (e.clientY - r.top) / r.height;
+    const info = cm.getScrollInfo();
+    cm.scrollTo(null, frac * info.height - info.clientHeight / 2);
+  });
+
+  cm.on("change", () => {
+    markDirty(rel);
+    scheduleMinimap(rel);
+  });
+  cm.on("scroll", () => updateMinimapView(rel));
 
   const tabEl = document.createElement("div");
   tabEl.className = "etab";
@@ -359,8 +400,60 @@ async function openFile(rel) {
   tabEl.addEventListener("click", () => selectEditor(rel));
   editorTabs.appendChild(tabEl);
 
-  editors.set(rel, { cm, dirty: false, tabEl, wrap });
+  editors.set(rel, { cm, dirty: false, tabEl, wrap, map, view });
   selectEditor(rel);
+}
+
+// --- minimap render ---------------------------------------------------------
+
+let minimapTimer = null;
+function scheduleMinimap(rel) {
+  clearTimeout(minimapTimer);
+  minimapTimer = setTimeout(() => renderMinimap(rel), 120);
+}
+
+function renderMinimap(rel) {
+  const ed = editors.get(rel);
+  if (!ed || rel !== activeEditor) return;
+  const { cm, map } = ed;
+  const w = 64;
+  const h = ed.wrap.clientHeight || 0;
+  if (!h) return;
+  const dpr = window.devicePixelRatio || 1;
+  map.width = w * dpr;
+  map.height = h * dpr;
+  const ctx = map.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("--text").trim();
+  ctx.globalAlpha = 0.5;
+
+  const lines = cm.getValue().split("\n");
+  const n = lines.length || 1;
+  const lh = Math.max(0.8, Math.min(3, h / n));
+  const pad = 3;
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const indent = raw.length - raw.trimStart().length;
+    const len = raw.trim().length;
+    if (!len) continue;
+    const y = (i / n) * h;
+    const x = pad + Math.min(indent, 28) * 1.4;
+    const barW = Math.min(len * 1.4, w - x - pad);
+    ctx.fillRect(x, y, Math.max(barW, 1), Math.max(lh - 0.4, 0.8));
+  }
+  updateMinimapView(rel);
+}
+
+function updateMinimapView(rel) {
+  const ed = editors.get(rel);
+  if (!ed || rel !== activeEditor) return;
+  const { cm, view, wrap } = ed;
+  const info = cm.getScrollInfo();
+  const h = wrap.clientHeight || 0;
+  const total = Math.max(info.height, 1);
+  view.style.top = (info.top / total) * h + "px";
+  view.style.height = Math.max((info.clientHeight / total) * h, 8) + "px";
 }
 
 function selectEditor(rel) {
@@ -372,9 +465,26 @@ function selectEditor(rel) {
     if (on) {
       ed.cm.refresh();
       ed.cm.focus();
+      renderMinimap(rel);
     }
   }
   setEditorPath();
+  persistTabs();
+}
+
+function persistTabs() {
+  localStorage.setItem("ade-tabs", JSON.stringify([...editors.keys()]));
+  localStorage.setItem("ade-active", activeEditor || "");
+}
+
+async function restoreTabs() {
+  let tabs = [];
+  try {
+    tabs = JSON.parse(localStorage.getItem("ade-tabs") || "[]");
+  } catch {}
+  const active = localStorage.getItem("ade-active") || "";
+  for (const rel of tabs) await openFile(rel);
+  if (active && editors.has(active)) selectEditor(active);
 }
 
 function markDirty(rel) {
@@ -400,6 +510,7 @@ function closeEditor(rel) {
       setEditorPath();
     }
   }
+  persistTabs();
 }
 
 async function saveActive() {
@@ -474,6 +585,16 @@ stopBtn.addEventListener("click", () => {
   invoke("stop");
   setStatus("cancelling…", "error");
 });
+
+// New window (same project) + new chat (wipe conversation).
+newWindowBtn.addEventListener("click", () => invoke("new_window"));
+clearChatBtn.addEventListener("click", async () => {
+  try {
+    await invoke("clear_session");
+  } catch {}
+  transcript.innerHTML = EMPTY_HTML;
+  liveAssistant = null;
+});
 function autoGrow() {
   promptEl.style.height = "auto";
   promptEl.style.height = Math.min(promptEl.scrollHeight, 160) + "px";
@@ -511,6 +632,7 @@ document.querySelectorAll(".splitter").forEach((sp) => {
       sp.classList.remove("dragging");
       document.removeEventListener("mousemove", move);
       document.removeEventListener("mouseup", up);
+      if (activeEditor) renderMinimap(activeEditor);
     };
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", up);
@@ -532,6 +654,7 @@ function applyTheme(name) {
   };
   for (const t of terminals.values()) t.term.options.theme = theme;
   for (const ed of editors.values()) ed.cm.setOption("theme", cmTheme());
+  if (activeEditor) renderMinimap(activeEditor);
 }
 themeSel.addEventListener("change", () => applyTheme(themeSel.value));
 
@@ -702,6 +825,8 @@ const COMMANDS = [
   { kind: "cmd", label: "Show Preview", run: () => showPanelTab("preview") },
   { kind: "cmd", label: "Reload Preview", run: () => $("preview-reload").click() },
   { kind: "cmd", label: "Save File", run: saveActive },
+  { kind: "cmd", label: "New Window", run: () => invoke("new_window") },
+  { kind: "cmd", label: "New Chat", run: () => clearChatBtn.click() },
   { kind: "cmd", label: "Theme: Dark+", run: () => applyTheme("dark") },
   { kind: "cmd", label: "Theme: Light", run: () => applyTheme("light") },
   { kind: "cmd", label: "Theme: Monokai", run: () => applyTheme("monokai") },
@@ -783,5 +908,15 @@ applyTheme(localStorage.getItem("ade-theme") || "dark");
 loadModels();
 loadTree();
 loadRoot();
+restoreChat();
+restoreTabs();
 showPanelTab("terminal");
 promptEl.focus();
+
+// Repaint the previous conversation (user/assistant text) after a restart.
+async function restoreChat() {
+  try {
+    const turns = await invoke("session_history");
+    for (const t of turns) addMessage(t.role, t.content);
+  } catch {}
+}

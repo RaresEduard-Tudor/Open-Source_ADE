@@ -67,6 +67,9 @@ select:focus, .url:focus { outline: 1px solid var(--accent); }
   padding: 7px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
   color: var(--muted); border-bottom: 1px solid var(--border); user-select: none;
 }
+.chat .pane-head { display: flex; align-items: center; justify-content: space-between; }
+.chat .pane-head button { text-transform: none; letter-spacing: 0; }
+.topbar-btn { line-height: 1; }
 
 /* ---- Explorer ------------------------------------------------------------ */
 .tree { overflow: auto; padding: 6px 4px; font-size: 13px; }
@@ -106,6 +109,11 @@ button.ghost.mini { padding: 2px 9px; }
 .cm-wrap.hidden { display: none; }
 .cm-empty { padding: 16px; color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
 .cm-host .CodeMirror { height: 100%; font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+
+/* Minimap (custom canvas overview on the right edge of each editor) */
+.cm-wrap.has-map .CodeMirror { width: calc(100% - 64px); }
+.minimap { position: absolute; top: 0; right: 0; width: 64px; height: 100%; background: var(--code-bg); border-left: 1px solid var(--border); cursor: pointer; }
+.minimap-view { position: absolute; right: 0; width: 64px; background: rgba(128, 128, 128, 0.2); border: 1px solid rgba(128, 128, 128, 0.35); pointer-events: none; }
 
 /* Diff (in chat tool results) */
 .diff { font-family: var(--mono); font-size: 12.5px; margin-top: 6px; white-space: pre; overflow: auto; max-height: 320px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--code-bg); }

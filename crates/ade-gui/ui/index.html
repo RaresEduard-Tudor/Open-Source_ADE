@@ -27,6 +27,7 @@
         <select id="model"></select>
       </label>
       <div id="status" class="status idle">ready</div>
+      <button id="new-window" class="ghost mini topbar-btn" title="New window">⧉</button>
     </header>
 
     <div class="body">
@@ -84,7 +85,10 @@
 
       <!-- Chat -->
       <section class="chat">
-        <div class="pane-head">Agent</div>
+        <div class="pane-head">
+          <span>Agent</span>
+          <button id="clear-chat" class="ghost mini" title="New chat">New chat</button>
+        </div>
         <div id="transcript" class="transcript">
           <div class="empty" id="empty">
             <div class="empty-logo">◆</div>
