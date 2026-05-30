@@ -11,8 +11,9 @@ command before it runs. No black box.
 - **Agentic** — agents read, edit, and run code through gated tools.
 - **Shared MCP + skills** — configure an MCP server or drop a skill folder once;
   every model uses them. No per-agent installs.
-- **Tiny** — single Rust binary, ~2.6 MB. WSL2-native.
-- **CLI first** — Tauri GUI is planned for phase 2.
+- **Tiny** — single Rust CLI binary, ~2.6 MB.
+- **Cross-platform** — runs on Linux, macOS, and Windows (and works under WSL2).
+- **CLI + GUI** — a CLI-first core with an optional Tauri desktop app on top.
 
 ## Install
 
