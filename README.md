@@ -85,10 +85,23 @@ Then run it (WSLg shows the window automatically):
 cargo run -p ade-gui
 ```
 
-Features: three-pane VSCode-style layout (file tree | editor | streaming chat),
-in-app permission prompts (Allow / Always / Deny), built-in tools, skills, and
-shared MCP servers — the same core as the CLI. Planned: syntax highlighting,
-diff view, multi-window.
+Features: three-pane VSCode-style layout (resizable file tree | editor | streaming
+chat), markdown rendering, in-app permission prompts (Allow / Always / Deny),
+Ctrl/Cmd+S save, status bar, built-in tools, skills, and shared MCP servers — the
+same core as the CLI. Planned: syntax highlighting, diff view, multi-window.
+
+### Platforms
+
+The CLI and core are pure Rust and run on **Linux, macOS, and Windows** (the
+shell tool uses `cmd.exe` on Windows, `/bin/sh` elsewhere). The GUI uses Tauri,
+so it runs on all three using the system webview — no per-OS code, only per-OS
+build deps:
+
+- **Linux/WSL2:** `webkit2gtk-4.1` + `librsvg` (see above).
+- **macOS:** Xcode command-line tools (`xcode-select --install`). WKWebView ships
+  with the OS.
+- **Windows:** WebView2 runtime (preinstalled on Windows 11; otherwise a small
+  Microsoft download) and the MSVC build tools.
 
 ## Architecture
 

@@ -8,9 +8,7 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="brand">
-        <span class="logo">◆</span> ADE
-      </div>
+      <div class="brand"><span class="logo">◆</span> ADE</div>
       <label class="model-picker">
         <span>model</span>
         <select id="model"></select>
@@ -20,23 +18,28 @@
 
     <div class="body">
       <aside class="sidebar">
-        <div class="pane-head">Files</div>
+        <div class="pane-head">Explorer</div>
         <div id="tree" class="tree"></div>
       </aside>
+
+      <div class="splitter" data-target="sidebar"></div>
 
       <section class="editor">
         <div class="pane-head editor-head">
           <span id="editor-path">no file open</span>
-          <button id="save" disabled>Save</button>
+          <button id="save" class="ghost" disabled>Save</button>
         </div>
         <textarea id="code" class="code" spellcheck="false"
-          placeholder="Select a file from the tree to view or edit it."></textarea>
+          placeholder="Select a file from the explorer to view or edit it.   (Ctrl/Cmd+S to save)"></textarea>
       </section>
+
+      <div class="splitter" data-target="chat"></div>
 
       <section class="chat">
         <div id="transcript" class="transcript">
           <div class="empty" id="empty">
-            Bring your own key. Pick a model. Ask it to read, edit, or run code.
+            <div class="empty-logo">◆</div>
+            <p>Bring your own key. Pick a model.<br />Ask the agent to read, edit, or run code.</p>
           </div>
         </div>
         <div class="composer">
@@ -49,6 +52,11 @@
         </div>
       </section>
     </div>
+
+    <footer class="statusbar">
+      <span id="sb-model" class="sb-item">—</span>
+      <span id="sb-root" class="sb-item sb-root">—</span>
+    </footer>
 
     <script src="app.js"></script>
   </body>

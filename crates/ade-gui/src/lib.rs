@@ -99,6 +99,12 @@ fn list_tree(state: State<AppState>, rel: String) -> Result<Vec<Entry>, String> 
     Ok(entries)
 }
 
+/// Absolute project root, for the status bar.
+#[tauri::command]
+fn project_root(state: State<AppState>) -> String {
+    state.cwd.display().to_string()
+}
+
 /// Read a project file as text.
 #[tauri::command]
 fn read_file_text(state: State<AppState>, rel: String) -> Result<String, String> {
@@ -261,7 +267,8 @@ pub fn run() {
             respond_permission,
             list_tree,
             read_file_text,
-            save_file_text
+            save_file_text,
+            project_root
         ])
         .run(tauri::generate_context!())
         .expect("error while running ADE GUI");

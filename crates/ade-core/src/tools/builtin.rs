@@ -238,7 +238,7 @@ impl Tool for RunShell {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "run_shell".into(),
-            description: "Run a shell command (/bin/sh) in the project root. Returns stdout+stderr."
+            description: "Run a shell command (cmd.exe on Windows, /bin/sh otherwise) in the project root. Returns stdout+stderr."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -255,8 +255,17 @@ impl Tool for RunShell {
     }
     async fn execute(&self, args: &Value, ctx: &ToolContext) -> Result<String> {
         let cmd = arg_str(args, "cmd")?;
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
+        // Use the platform's shell: cmd.exe on Windows, /bin/sh elsewhere.
+        let mut command = if cfg!(windows) {
+            let mut c = std::process::Command::new("cmd");
+            c.arg("/C");
+            c
+        } else {
+            let mut c = std::process::Command::new("/bin/sh");
+            c.arg("-c");
+            c
+        };
+        let output = command
             .arg(cmd)
             .current_dir(&ctx.root)
             .output()
