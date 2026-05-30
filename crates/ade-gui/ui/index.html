@@ -18,20 +18,37 @@
       <div id="status" class="status idle">ready</div>
     </header>
 
-    <main id="transcript" class="transcript">
-      <div class="empty" id="empty">
-        Bring your own key. Pick a model. Ask it to read, edit, or run code.
-      </div>
-    </main>
+    <div class="body">
+      <aside class="sidebar">
+        <div class="pane-head">Files</div>
+        <div id="tree" class="tree"></div>
+      </aside>
 
-    <footer class="composer">
-      <textarea
-        id="prompt"
-        rows="1"
-        placeholder="Ask the agent…  (Enter to send, Shift+Enter for newline)"
-      ></textarea>
-      <button id="send">Send</button>
-    </footer>
+      <section class="editor">
+        <div class="pane-head editor-head">
+          <span id="editor-path">no file open</span>
+          <button id="save" disabled>Save</button>
+        </div>
+        <textarea id="code" class="code" spellcheck="false"
+          placeholder="Select a file from the tree to view or edit it."></textarea>
+      </section>
+
+      <section class="chat">
+        <div id="transcript" class="transcript">
+          <div class="empty" id="empty">
+            Bring your own key. Pick a model. Ask it to read, edit, or run code.
+          </div>
+        </div>
+        <div class="composer">
+          <textarea
+            id="prompt"
+            rows="1"
+            placeholder="Ask the agent…  (Enter to send, Shift+Enter for newline)"
+          ></textarea>
+          <button id="send">Send</button>
+        </div>
+      </section>
+    </div>
 
     <script src="app.js"></script>
   </body>

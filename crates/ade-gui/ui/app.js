@@ -8,6 +8,13 @@ const modelSel = $("model");
 const promptEl = $("prompt");
 const sendBtn = $("send");
 const statusEl = $("status");
+const treeEl = $("tree");
+const codeEl = $("code");
+const editorPathEl = $("editor-path");
+const saveBtn = $("save");
+
+let openPath = null;
+let dirty = false;
 
 // The assistant element currently being streamed into (null = start a new one).
 let liveAssistant = null;
@@ -48,6 +55,101 @@ function addTool(name, summary) {
   scrollDown();
   return el;
 }
+
+// --- file tree --------------------------------------------------------------
+
+async function loadChildren(rel, container) {
+  let entries;
+  try {
+    entries = await invoke("list_tree", { rel });
+  } catch (e) {
+    return;
+  }
+  container.innerHTML = "";
+  for (const ent of entries) {
+    const childRel = rel ? rel + "/" + ent.name : ent.name;
+    const node = document.createElement("div");
+    node.className = "node";
+    const twisty = document.createElement("span");
+    twisty.className = "twisty";
+    twisty.textContent = ent.dir ? "▸" : "";
+    const ic = document.createElement("span");
+    ic.className = "ic";
+    ic.textContent = ent.dir ? "📁" : "📄";
+    const label = document.createElement("span");
+    label.textContent = ent.name;
+    node.append(twisty, ic, label);
+    container.appendChild(node);
+
+    if (ent.dir) {
+      const kids = document.createElement("div");
+      kids.className = "children";
+      kids.style.display = "none";
+      container.appendChild(kids);
+      let loaded = false;
+      node.addEventListener("click", async () => {
+        const open = kids.style.display !== "none";
+        kids.style.display = open ? "none" : "block";
+        twisty.textContent = open ? "▸" : "▾";
+        ic.textContent = open ? "📁" : "📂";
+        if (!loaded && !open) {
+          loaded = true;
+          await loadChildren(childRel, kids);
+        }
+      });
+    } else {
+      node.addEventListener("click", () => {
+        document.querySelectorAll(".tree .node.active").forEach((n) => n.classList.remove("active"));
+        node.classList.add("active");
+        openFile(childRel);
+      });
+    }
+  }
+}
+
+function loadTree() {
+  loadChildren("", treeEl);
+}
+
+async function openFile(rel) {
+  try {
+    const text = await invoke("read_file_text", { rel });
+    codeEl.value = text;
+    editorPathEl.textContent = rel;
+    openPath = rel;
+    dirty = false;
+    saveBtn.disabled = true;
+  } catch (e) {
+    editorPathEl.textContent = rel + " — " + e;
+    codeEl.value = "";
+    openPath = null;
+  }
+}
+
+async function reloadOpenFile() {
+  if (openPath && !dirty) {
+    const keep = openPath;
+    await openFile(keep);
+  }
+}
+
+codeEl.addEventListener("input", () => {
+  if (openPath) {
+    dirty = true;
+    saveBtn.disabled = false;
+  }
+});
+
+saveBtn.addEventListener("click", async () => {
+  if (!openPath) return;
+  try {
+    await invoke("save_file_text", { rel: openPath, content: codeEl.value });
+    dirty = false;
+    saveBtn.disabled = true;
+  } catch (e) {
+    editorPathEl.textContent = openPath + " — save failed: " + e;
+  }
+});
 
 // --- model list -------------------------------------------------------------
 
@@ -160,6 +262,9 @@ async function send() {
   try {
     await invoke("send_prompt", { prompt, model: modelSel.value || null });
     setStatus("ready", "idle");
+    // The agent may have changed files: refresh tree + reload the open file.
+    loadTree();
+    reloadOpenFile();
   } catch (e) {
     addMessage("assistant", "⚠ " + e);
     setStatus("error", "error");
@@ -185,4 +290,5 @@ promptEl.addEventListener("keydown", (e) => {
 });
 
 loadModels();
+loadTree();
 promptEl.focus();

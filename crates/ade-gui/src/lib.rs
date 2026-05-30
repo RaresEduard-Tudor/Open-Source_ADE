@@ -23,7 +23,7 @@ use ade_core::permission::{ApprovalRequest, Approver, Decision, PermissionGate};
 use ade_core::provider;
 use ade_core::session::Session;
 use ade_core::skills::SkillRegistry;
-use ade_core::tools::{ToolContext, ToolRegistry};
+use ade_core::tools::{safe_join, ToolContext, ToolRegistry};
 
 /// Process-wide state: loaded config, working dir, the live conversation, and
 /// the bookkeeping that lets a synchronous permission check await a click in
@@ -61,6 +61,49 @@ fn list_models(state: State<AppState>) -> Vec<ModelInfo> {
             default: active.as_deref() == Some(p.name.as_str()),
         })
         .collect()
+}
+
+/// Directory names hidden from the file tree.
+const TREE_SKIP: &[&str] = &[".git", "target", "node_modules"];
+
+#[derive(Serialize)]
+struct Entry {
+    name: String,
+    dir: bool,
+}
+
+/// List one directory level under the project root (`rel` is "" for the root).
+/// Directories first, then files, both alphabetical.
+#[tauri::command]
+fn list_tree(state: State<AppState>, rel: String) -> Result<Vec<Entry>, String> {
+    let dir = safe_join(&state.cwd, if rel.is_empty() { "." } else { &rel })
+        .map_err(|e| e.to_string())?;
+    let mut entries = Vec::new();
+    for e in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let e = e.map_err(|e| e.to_string())?;
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || TREE_SKIP.contains(&name.as_str()) {
+            continue;
+        }
+        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        entries.push(Entry { name, dir: is_dir });
+    }
+    entries.sort_by(|a, b| b.dir.cmp(&a.dir).then(a.name.cmp(&b.name)));
+    Ok(entries)
+}
+
+/// Read a project file as text.
+#[tauri::command]
+fn read_file_text(state: State<AppState>, rel: String) -> Result<String, String> {
+    let path = safe_join(&state.cwd, &rel).map_err(|e| e.to_string())?;
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Save text to a project file (an explicit user action — not gated).
+#[tauri::command]
+fn save_file_text(state: State<AppState>, rel: String, content: String) -> Result<(), String> {
+    let path = safe_join(&state.cwd, &rel).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
 /// Emits agent activity to the webview as Tauri events.
@@ -203,7 +246,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_models,
             send_prompt,
-            respond_permission
+            respond_permission,
+            list_tree,
+            read_file_text,
+            save_file_text
         ])
         .run(tauri::generate_context!())
         .expect("error while running ADE GUI");

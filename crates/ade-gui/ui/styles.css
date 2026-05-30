@@ -24,9 +24,75 @@ html, body {
 
 body {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
   height: 100vh;
 }
+
+/* 3-pane body: file tree | editor | chat */
+.body {
+  display: grid;
+  grid-template-columns: 230px 1fr 380px;
+  min-height: 0;
+}
+.sidebar, .editor, .chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.sidebar { border-right: 1px solid var(--border); background: var(--panel); }
+.editor { border-right: 1px solid var(--border); }
+
+.pane-head {
+  padding: 8px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+/* File tree */
+.tree { overflow: auto; padding: 6px 4px; font-size: 13px; }
+.tree .node {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tree .node:hover { background: var(--panel-2); }
+.tree .node.active { background: var(--user); color: #fff; }
+.tree .twisty { width: 12px; color: var(--muted); }
+.tree .ic { opacity: 0.8; }
+.tree .children { margin-left: 12px; }
+
+/* Editor */
+.editor-head { display: flex; align-items: center; justify-content: space-between; }
+#editor-path { font-family: var(--mono); text-transform: none; letter-spacing: 0; color: var(--text); }
+.code {
+  flex: 1;
+  resize: none;
+  border: none;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 12px 14px;
+  tab-size: 4;
+}
+#save {
+  padding: 3px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+/* Chat column */
+.chat { border-left: 0; }
 
 /* Top bar */
 .topbar {
@@ -72,6 +138,8 @@ select {
 
 /* Transcript */
 .transcript {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 22px 18px;
   display: flex;
