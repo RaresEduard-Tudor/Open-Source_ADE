@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="vendor/cm/codemirror.css" />
     <link rel="stylesheet" href="vendor/cm/theme/monokai.css" />
     <link rel="stylesheet" href="vendor/cm/theme/material-darker.css" />
+    <link rel="stylesheet" href="vendor/cm/addon/dialog.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body data-theme="dark">
@@ -94,6 +95,7 @@
           <textarea id="prompt" rows="1"
             placeholder="Ask the agent…  (Enter to send, Shift+Enter for newline)"></textarea>
           <button id="send">Send</button>
+          <button id="stop" class="danger hidden">Stop</button>
         </div>
       </section>
     </div>
@@ -102,6 +104,13 @@
       <span id="sb-model" class="sb-item">—</span>
       <span id="sb-root" class="sb-item sb-root">—</span>
     </footer>
+
+    <div id="palette" class="palette hidden">
+      <div class="palette-box">
+        <input id="palette-input" placeholder="Type a command or file…  (Esc to close)" />
+        <div id="palette-list" class="palette-list"></div>
+      </div>
+    </div>
 
     <script src="vendor/xterm.js"></script>
     <script src="vendor/xterm-addon-fit.js"></script>
@@ -117,6 +126,9 @@
     <script src="vendor/cm/mode/shell.js"></script>
     <script src="vendor/cm/mode/toml.js"></script>
     <script src="vendor/cm/mode/yaml.js"></script>
+    <script src="vendor/cm/addon/dialog.js"></script>
+    <script src="vendor/cm/addon/searchcursor.js"></script>
+    <script src="vendor/cm/addon/search.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

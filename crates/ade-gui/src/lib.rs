@@ -46,6 +46,8 @@ pub(crate) struct AppState {
     next_perm_id: AtomicU64,
     /// Tools the user chose "always allow" for this session.
     session_allow: Mutex<HashSet<String>>,
+    /// Notified to cancel the in-flight agent turn.
+    cancel: tokio::sync::Notify,
 }
 
 #[derive(Serialize)]
@@ -105,6 +107,38 @@ fn list_tree(state: State<AppState>, rel: String) -> Result<Vec<Entry>, String> 
 #[tauri::command]
 fn project_root(state: State<AppState>) -> String {
     state.cwd.display().to_string()
+}
+
+/// Flat, recursive list of project files (capped) for the command palette.
+#[tauri::command]
+fn list_files(state: State<AppState>) -> Vec<String> {
+    let mut out = Vec::new();
+    fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
+        const CAP: usize = 4000;
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            if out.len() >= CAP {
+                return;
+            }
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || TREE_SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            let path = e.path();
+            match e.file_type() {
+                Ok(t) if t.is_dir() => walk(root, &path, out),
+                Ok(t) if t.is_file() => {
+                    if let Ok(rel) = path.strip_prefix(root) {
+                        out.push(rel.to_string_lossy().replace('\\', "/"));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    walk(&state.cwd, &state.cwd, &mut out);
+    out.sort();
+    out
 }
 
 /// Read a project file as text.
@@ -222,11 +256,31 @@ async fn send_prompt(
         system: Some(state.system.clone()),
         max_iters: 25,
     };
-    let result = agent.run_turn(&mut session, &prompt, &reporter).await;
+    // Race the turn against a cancel signal so Stop can interrupt mid-stream.
+    // Scope the future so its borrow of `session` ends before we move it.
+    let outcome = {
+        let run = agent.run_turn(&mut session, &prompt, &reporter);
+        tokio::pin!(run);
+        tokio::select! {
+            r = &mut run => Some(r.map_err(|e| e.to_string())),
+            _ = state.cancel.notified() => None,
+        }
+    };
 
-    // Persist updated history back into shared state.
-    *state.session.lock().unwrap() = session;
-    result.map_err(|e| e.to_string())
+    match outcome {
+        Some(r) => {
+            // Persist updated history back into shared state.
+            *state.session.lock().unwrap() = session;
+            r
+        }
+        None => Ok("(cancelled)".to_string()), // partial turn discarded
+    }
+}
+
+/// Cancel the in-flight agent turn.
+#[tauri::command]
+fn stop(state: State<AppState>) {
+    state.cancel.notify_waiters();
 }
 
 /// Tauri entry point.
@@ -262,6 +316,7 @@ pub fn run() {
             pending: Mutex::new(HashMap::new()),
             next_perm_id: AtomicU64::new(1),
             session_allow: Mutex::new(HashSet::new()),
+            cancel: tokio::sync::Notify::new(),
         })
         .manage(terminal::Terminals::default())
         .invoke_handler(tauri::generate_handler![
@@ -272,6 +327,8 @@ pub fn run() {
             read_file_text,
             save_file_text,
             project_root,
+            list_files,
+            stop,
             terminal::term_open,
             terminal::term_input,
             terminal::term_resize,

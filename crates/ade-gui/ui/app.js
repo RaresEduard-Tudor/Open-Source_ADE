@@ -7,6 +7,7 @@ const transcript = $("transcript");
 const modelSel = $("model");
 const promptEl = $("prompt");
 const sendBtn = $("send");
+const stopBtn = $("stop");
 const statusEl = $("status");
 const treeEl = $("tree");
 const editorPathEl = $("editor-path");
@@ -449,23 +450,30 @@ async function send() {
   addMessage("user", prompt);
   liveAssistant = null;
 
-  sendBtn.disabled = true;
+  sendBtn.classList.add("hidden");
+  stopBtn.classList.remove("hidden");
   promptEl.disabled = true;
   setStatus("thinking…", "busy");
   try {
-    await invoke("send_prompt", { prompt, model: modelSel.value || null });
-    setStatus("ready", "idle");
+    const res = await invoke("send_prompt", { prompt, model: modelSel.value || null });
+    const cancelled = res === "(cancelled)";
+    setStatus(cancelled ? "cancelled" : "ready", cancelled ? "error" : "idle");
     loadTree();
     reloadOpenFile();
   } catch (e) {
     addMessage("assistant", "⚠ " + e);
     setStatus("error", "error");
   } finally {
-    sendBtn.disabled = false;
+    stopBtn.classList.add("hidden");
+    sendBtn.classList.remove("hidden");
     promptEl.disabled = false;
     promptEl.focus();
   }
 }
+stopBtn.addEventListener("click", () => {
+  invoke("stop");
+  setStatus("cancelling…", "error");
+});
 function autoGrow() {
   promptEl.style.height = "auto";
   promptEl.style.height = Math.min(promptEl.scrollHeight, 160) + "px";
@@ -676,6 +684,97 @@ $("preview-reload").addEventListener("click", () => {
 });
 previewUrl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") loadPreview();
+});
+
+// --- command palette --------------------------------------------------------
+
+const palette = $("palette");
+const paletteInput = $("palette-input");
+const paletteList = $("palette-list");
+let paletteEntries = [];
+let paletteFiltered = [];
+let paletteSel = 0;
+let fileEntriesLoaded = false;
+
+const COMMANDS = [
+  { kind: "cmd", label: "New Terminal", run: () => { showPanelTab("terminal"); newTerminal(); } },
+  { kind: "cmd", label: "Show Terminal", run: () => showPanelTab("terminal") },
+  { kind: "cmd", label: "Show Preview", run: () => showPanelTab("preview") },
+  { kind: "cmd", label: "Reload Preview", run: () => $("preview-reload").click() },
+  { kind: "cmd", label: "Save File", run: saveActive },
+  { kind: "cmd", label: "Theme: Dark+", run: () => applyTheme("dark") },
+  { kind: "cmd", label: "Theme: Light", run: () => applyTheme("light") },
+  { kind: "cmd", label: "Theme: Monokai", run: () => applyTheme("monokai") },
+  { kind: "cmd", label: "Focus Chat", run: () => promptEl.focus() },
+];
+
+function fuzzy(q, s) {
+  q = q.toLowerCase();
+  s = s.toLowerCase();
+  let i = 0;
+  for (const c of s) if (c === q[i]) i++;
+  return i === q.length;
+}
+
+async function openPalette() {
+  if (!fileEntriesLoaded) {
+    fileEntriesLoaded = true;
+    try {
+      for (const f of await invoke("list_files"))
+        COMMANDS.push({ kind: "file", label: f, run: () => openFile(f) });
+    } catch {}
+  }
+  paletteEntries = COMMANDS;
+  palette.classList.remove("hidden");
+  paletteInput.value = "";
+  filterPalette("");
+  paletteInput.focus();
+}
+function closePalette() {
+  palette.classList.add("hidden");
+}
+function filterPalette(q) {
+  paletteFiltered = (q ? paletteEntries.filter((e) => fuzzy(q, e.label)) : paletteEntries).slice(0, 60);
+  paletteSel = 0;
+  renderPalette();
+}
+function renderPalette() {
+  paletteList.innerHTML = "";
+  paletteFiltered.forEach((e, i) => {
+    const el = document.createElement("div");
+    el.className = "palette-item" + (i === paletteSel ? " sel" : "");
+    const k = document.createElement("span");
+    k.className = "kind";
+    k.textContent = e.kind;
+    const l = document.createElement("span");
+    l.textContent = e.label;
+    el.append(k, l);
+    el.addEventListener("click", () => runPaletteItem(i));
+    paletteList.appendChild(el);
+  });
+}
+function runPaletteItem(i) {
+  const e = paletteFiltered[i];
+  closePalette();
+  if (e) e.run();
+}
+function scrollSel() {
+  const el = paletteList.children[paletteSel];
+  if (el) el.scrollIntoView({ block: "nearest" });
+}
+paletteInput.addEventListener("input", () => filterPalette(paletteInput.value.trim()));
+paletteInput.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") { e.preventDefault(); paletteSel = Math.min(paletteSel + 1, paletteFiltered.length - 1); renderPalette(); scrollSel(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); paletteSel = Math.max(paletteSel - 1, 0); renderPalette(); scrollSel(); }
+  else if (e.key === "Enter") { e.preventDefault(); runPaletteItem(paletteSel); }
+  else if (e.key === "Escape") { closePalette(); }
+});
+palette.addEventListener("mousedown", (e) => { if (e.target === palette) closePalette(); });
+window.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "p") {
+    e.preventDefault();
+    palette.classList.contains("hidden") ? openPalette() : closePalette();
+  }
 });
 
 // --- init -------------------------------------------------------------------
