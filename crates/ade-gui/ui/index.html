@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ADE</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">◆</span> ADE
+      </div>
+      <label class="model-picker">
+        <span>model</span>
+        <select id="model"></select>
+      </label>
+      <div id="status" class="status idle">ready</div>
+    </header>
+
+    <main id="transcript" class="transcript">
+      <div class="empty" id="empty">
+        Bring your own key. Pick a model. Ask it to read, edit, or run code.
+      </div>
+    </main>
+
+    <footer class="composer">
+      <textarea
+        id="prompt"
+        rows="1"
+        placeholder="Ask the agent…  (Enter to send, Shift+Enter for newline)"
+      ></textarea>
+      <button id="send">Send</button>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>

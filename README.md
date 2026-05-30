@@ -64,11 +64,36 @@ into the same list, so every model sees them identically.
   `./.ade/skills/`). Only name + description load up front; the agent calls
   `use_skill` to pull full instructions on demand.
 
+## GUI (preview)
+
+A Tauri desktop shell lives in `crates/ade-gui` — a model dropdown plus a
+streaming chat panel, reusing the exact same core (providers, tools, streaming,
+skills). It is **not** part of the default build because it needs system webkit
+libraries.
+
+On Debian/Ubuntu/WSL2, install the prerequisites once:
+
+```sh
+sudo apt update && sudo apt install -y \
+  libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Then run it (WSLg shows the window automatically):
+
+```sh
+cargo run -p ade-gui
+```
+
+Thin-slice scope: streaming chat with built-in tools + skills, mutating actions
+auto-approved. Planned: in-GUI permission prompts, file tree, editor pane, MCP.
+
 ## Architecture
 
 ```text
 crates/ade-core   provider adapters, tool registry, MCP host, skills, agent loop
 crates/ade-cli    the `ade` binary
+crates/ade-gui    Tauri desktop shell (preview) over ade-core
 ```
 
 Workspace, lib-first so a future GUI shares the core. Built for a tiny binary

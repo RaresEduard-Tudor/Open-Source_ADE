@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/ade-core", "crates/ade-cli"]
+members = ["crates/ade-core", "crates/ade-cli", "crates/ade-gui"]
+# GUI is excluded from the default build because it needs system webkit2gtk
+# dev libraries. `cargo build` stays green on a fresh box; build the GUI
+# explicitly with `cargo build -p ade-gui` once those libs are installed.
+default-members = ["crates/ade-core", "crates/ade-cli"]
 
 [workspace.package]
 version = "0.1.0"
