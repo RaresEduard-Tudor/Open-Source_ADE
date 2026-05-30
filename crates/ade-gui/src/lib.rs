@@ -8,6 +8,8 @@
 //! skills, mutating actions auto-approved (an in-GUI approval dialog is the
 //! next step — see README). MCP is CLI-only for now.
 
+mod terminal;
+
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,9 +31,9 @@ use ade_core::tools::{safe_join, ToolContext, ToolRegistry};
 /// Process-wide state: loaded config, working dir, the live conversation, and
 /// the bookkeeping that lets a synchronous permission check await a click in
 /// the webview.
-struct AppState {
+pub(crate) struct AppState {
     cfg: Config,
-    cwd: PathBuf,
+    pub(crate) cwd: PathBuf,
     session: Mutex<Session>,
     /// Built once: built-in tools + skills + shared MCP tools.
     registry: ToolRegistry,
@@ -261,6 +263,7 @@ pub fn run() {
             next_perm_id: AtomicU64::new(1),
             session_allow: Mutex::new(HashSet::new()),
         })
+        .manage(terminal::Terminals::default())
         .invoke_handler(tauri::generate_handler![
             list_models,
             send_prompt,
@@ -268,7 +271,11 @@ pub fn run() {
             list_tree,
             read_file_text,
             save_file_text,
-            project_root
+            project_root,
+            terminal::term_open,
+            terminal::term_input,
+            terminal::term_resize,
+            terminal::term_close
         ])
         .run(tauri::generate_context!())
         .expect("error while running ADE GUI");

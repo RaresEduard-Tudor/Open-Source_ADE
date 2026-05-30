@@ -356,16 +356,19 @@ document.querySelectorAll(".splitter").forEach((sp) => {
   sp.addEventListener("mousedown", (e) => {
     e.preventDefault();
     sp.classList.add("dragging");
-    const target = sp.dataset.target; // "sidebar" | "chat"
-    const startX = e.clientX;
-    const varName = target === "sidebar" ? "--sidebar-w" : "--chat-w";
+    const target = sp.dataset.target; // sidebar | chat | panel
+    const horizontal = sp.classList.contains("h");
+    const startPos = horizontal ? e.clientY : e.clientX;
+    const varName =
+      target === "sidebar" ? "--sidebar-w" : target === "chat" ? "--chat-w" : "--panel-h";
     const start = parseInt(getComputedStyle(document.documentElement).getPropertyValue(varName));
     const move = (ev) => {
-      const delta = ev.clientX - startX;
-      // sidebar grows to the right; chat grows to the left.
+      const delta = (horizontal ? ev.clientY : ev.clientX) - startPos;
+      // sidebar grows right; chat & panel grow toward the start (left/up).
       let next = target === "sidebar" ? start + delta : start - delta;
-      next = Math.max(140, Math.min(640, next));
+      next = Math.max(horizontal ? 80 : 140, Math.min(horizontal ? 600 : 640, next));
       document.documentElement.style.setProperty(varName, next + "px");
+      if (target === "panel") fitActiveTerminal();
     };
     const up = () => {
       sp.classList.remove("dragging");
@@ -377,9 +380,179 @@ document.querySelectorAll(".splitter").forEach((sp) => {
   });
 });
 
+// --- theme ------------------------------------------------------------------
+
+const themeSel = $("theme");
+function applyTheme(name) {
+  document.body.dataset.theme = name;
+  themeSel.value = name;
+  localStorage.setItem("ade-theme", name);
+  // Recolor open terminals to match.
+  const css = getComputedStyle(document.body);
+  const theme = {
+    background: css.getPropertyValue("--bg").trim(),
+    foreground: css.getPropertyValue("--text").trim(),
+  };
+  for (const t of terminals.values()) t.term.options.theme = theme;
+}
+themeSel.addEventListener("change", () => applyTheme(themeSel.value));
+
+// --- bottom panel tabs ------------------------------------------------------
+
+function showPanelTab(tab) {
+  document.querySelectorAll(".ptab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  $("terminal-view").classList.toggle("hidden", tab !== "terminal");
+  $("preview-view").classList.toggle("hidden", tab !== "preview");
+  $("term-actions").classList.toggle("hidden", tab !== "terminal");
+  $("preview-actions").classList.toggle("hidden", tab !== "preview");
+  if (tab === "terminal") {
+    if (terminals.size === 0) newTerminal();
+    fitActiveTerminal();
+  }
+}
+document.querySelectorAll(".ptab").forEach((b) =>
+  b.addEventListener("click", () => showPanelTab(b.dataset.tab))
+);
+
+// --- terminals (xterm + PTY) ------------------------------------------------
+
+const terminals = new Map(); // id -> { term, fit, el, tabEl }
+let activeTerm = null;
+const termHost = $("term-host");
+const termTabs = $("term-tabs");
+
+function termTheme() {
+  const css = getComputedStyle(document.body);
+  return {
+    background: css.getPropertyValue("--bg").trim(),
+    foreground: css.getPropertyValue("--text").trim(),
+  };
+}
+
+async function newTerminal() {
+  const el = document.createElement("div");
+  el.className = "term-inst";
+  termHost.appendChild(el);
+
+  const term = new Terminal({
+    fontFamily: getComputedStyle(document.body).getPropertyValue("--mono"),
+    fontSize: 13,
+    cursorBlink: true,
+    theme: termTheme(),
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(el);
+  fit.fit();
+
+  let id;
+  try {
+    id = await invoke("term_open", { rows: term.rows, cols: term.cols });
+  } catch (e) {
+    term.write("\r\n\x1b[31mfailed to open terminal: " + e + "\x1b[0m\r\n");
+    return;
+  }
+
+  const tabEl = document.createElement("div");
+  tabEl.className = "term-tab";
+  const label = document.createElement("span");
+  label.textContent = "sh " + id;
+  const x = document.createElement("span");
+  x.className = "x";
+  x.textContent = "✕";
+  x.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    closeTerminal(id);
+  });
+  tabEl.append(label, x);
+  tabEl.addEventListener("click", () => selectTerminal(id));
+  termTabs.appendChild(tabEl);
+
+  terminals.set(id, { term, fit, el, tabEl });
+  term.onData((d) => invoke("term_input", { id, data: d }));
+  new ResizeObserver(() => {
+    if (activeTerm === id) {
+      fit.fit();
+      invoke("term_resize", { id, rows: term.rows, cols: term.cols });
+    }
+  }).observe(el);
+
+  selectTerminal(id);
+}
+
+function selectTerminal(id) {
+  activeTerm = id;
+  for (const [tid, t] of terminals) {
+    const on = tid === id;
+    t.el.classList.toggle("hidden", !on);
+    t.tabEl.classList.toggle("active", on);
+    if (on) {
+      t.fit.fit();
+      t.term.focus();
+      invoke("term_resize", { id, rows: t.term.rows, cols: t.term.cols });
+    }
+  }
+}
+
+function closeTerminal(id) {
+  const t = terminals.get(id);
+  if (!t) return;
+  invoke("term_close", { id });
+  t.term.dispose();
+  t.el.remove();
+  t.tabEl.remove();
+  terminals.delete(id);
+  if (activeTerm === id) {
+    const next = terminals.keys().next();
+    activeTerm = null;
+    if (!next.done) selectTerminal(next.value);
+  }
+}
+
+function fitActiveTerminal() {
+  const t = terminals.get(activeTerm);
+  if (t) {
+    t.fit.fit();
+    invoke("term_resize", { id: activeTerm, rows: t.term.rows, cols: t.term.cols });
+  }
+}
+
+$("term-new").addEventListener("click", newTerminal);
+
+listen("term-output", (e) => {
+  const t = terminals.get(e.payload.id);
+  if (t) t.term.write(e.payload.data);
+});
+listen("term-exit", (e) => {
+  const t = terminals.get(e.payload.id);
+  if (t) t.term.write("\r\n\x1b[90m[process exited]\x1b[0m\r\n");
+});
+
+// --- preview ----------------------------------------------------------------
+
+const previewFrame = $("preview-frame");
+const previewUrl = $("preview-url");
+function loadPreview() {
+  let url = previewUrl.value.trim();
+  if (url && !/^https?:\/\//.test(url)) url = "http://" + url;
+  previewFrame.src = url || "about:blank";
+}
+$("preview-go").addEventListener("click", loadPreview);
+$("preview-reload").addEventListener("click", () => {
+  // Force reload even if the URL is unchanged.
+  const u = previewFrame.src;
+  previewFrame.src = "about:blank";
+  setTimeout(() => (previewFrame.src = u), 30);
+});
+previewUrl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") loadPreview();
+});
+
 // --- init -------------------------------------------------------------------
 
+applyTheme(localStorage.getItem("ade-theme") || "dark");
 loadModels();
 loadTree();
 loadRoot();
+showPanelTab("terminal");
 promptEl.focus();

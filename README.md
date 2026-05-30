@@ -85,10 +85,13 @@ Then run it (WSLg shows the window automatically):
 cargo run -p ade-gui
 ```
 
-Features: three-pane VSCode-style layout (resizable file tree | editor | streaming
-chat), markdown rendering, in-app permission prompts (Allow / Always / Deny),
-Ctrl/Cmd+S save, status bar, built-in tools, skills, and shared MCP servers — the
-same core as the CLI. Planned: syntax highlighting, diff view, multi-window.
+VSCode-style layout: resizable Explorer, editor (Ctrl/Cmd+S save), a bottom panel
+with **integrated terminals** (real PTYs via xterm.js) and a **Preview** tab
+(loads a running dev server / URL in an iframe), and the agent chat docked on the
+right with markdown rendering and in-app permission prompts (Allow / Always /
+Deny). Three switchable **themes** (Dark+, Light, Monokai). Built-in tools,
+skills, and shared MCP servers — the same core as the CLI. Planned: editor tabs,
+syntax highlighting, diff view.
 
 ### Platforms
 

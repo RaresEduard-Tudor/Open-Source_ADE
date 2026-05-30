@@ -4,12 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ADE</title>
+    <link rel="stylesheet" href="vendor/xterm.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body data-theme="dark">
     <header class="topbar">
       <div class="brand"><span class="logo">◆</span> ADE</div>
-      <label class="model-picker">
+      <label class="picker">
+        <span>theme</span>
+        <select id="theme">
+          <option value="dark">Dark+</option>
+          <option value="light">Light</option>
+          <option value="monokai">Monokai</option>
+        </select>
+      </label>
+      <label class="picker">
         <span>model</span>
         <select id="model"></select>
       </label>
@@ -17,25 +26,59 @@
     </header>
 
     <div class="body">
+      <!-- Explorer -->
       <aside class="sidebar">
         <div class="pane-head">Explorer</div>
         <div id="tree" class="tree"></div>
       </aside>
 
-      <div class="splitter" data-target="sidebar"></div>
+      <div class="splitter v" data-target="sidebar"></div>
 
-      <section class="editor">
-        <div class="pane-head editor-head">
-          <span id="editor-path">no file open</span>
-          <button id="save" class="ghost" disabled>Save</button>
-        </div>
-        <textarea id="code" class="code" spellcheck="false"
-          placeholder="Select a file from the explorer to view or edit it.   (Ctrl/Cmd+S to save)"></textarea>
+      <!-- Center: editor + bottom panel -->
+      <section class="center">
+        <section class="editor">
+          <div class="pane-head editor-head">
+            <span id="editor-path">no file open</span>
+            <button id="save" class="ghost" disabled>Save</button>
+          </div>
+          <textarea id="code" class="code" spellcheck="false"
+            placeholder="Select a file from the explorer to view or edit it.   (Ctrl/Cmd+S to save)"></textarea>
+        </section>
+
+        <div class="splitter h" data-target="panel"></div>
+
+        <section class="panel">
+          <div class="panel-tabs">
+            <button class="ptab active" data-tab="terminal">Terminal</button>
+            <button class="ptab" data-tab="preview">Preview</button>
+            <div class="panel-actions">
+              <span id="term-actions">
+                <button id="term-new" class="ghost mini" title="New terminal">+</button>
+              </span>
+              <span id="preview-actions" class="hidden">
+                <input id="preview-url" class="url" value="http://localhost:3000" />
+                <button id="preview-go" class="ghost mini">Go</button>
+                <button id="preview-reload" class="ghost mini" title="Reload">⟳</button>
+              </span>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div id="terminal-view" class="tabview">
+              <div id="term-tabs" class="term-tabs"></div>
+              <div id="term-host" class="term-host"></div>
+            </div>
+            <div id="preview-view" class="tabview hidden">
+              <iframe id="preview-frame" class="preview-frame" src="about:blank"></iframe>
+            </div>
+          </div>
+        </section>
       </section>
 
-      <div class="splitter" data-target="chat"></div>
+      <div class="splitter v" data-target="chat"></div>
 
+      <!-- Chat -->
       <section class="chat">
+        <div class="pane-head">Agent</div>
         <div id="transcript" class="transcript">
           <div class="empty" id="empty">
             <div class="empty-logo">◆</div>
@@ -43,11 +86,8 @@
           </div>
         </div>
         <div class="composer">
-          <textarea
-            id="prompt"
-            rows="1"
-            placeholder="Ask the agent…  (Enter to send, Shift+Enter for newline)"
-          ></textarea>
+          <textarea id="prompt" rows="1"
+            placeholder="Ask the agent…  (Enter to send, Shift+Enter for newline)"></textarea>
           <button id="send">Send</button>
         </div>
       </section>
@@ -58,6 +98,8 @@
       <span id="sb-root" class="sb-item sb-root">—</span>
     </footer>
 
+    <script src="vendor/xterm.js"></script>
+    <script src="vendor/xterm-addon-fit.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
