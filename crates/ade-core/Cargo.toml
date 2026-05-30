@@ -1,0 +1,30 @@
+[package]
+name = "ade-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Core library for ADE: providers, agent loop, tools, MCP, skills."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+dirs.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[features]
+# OS keyring support pulls in dbus/secret-service; off by default for a lean,
+# WSL2-friendly build. Enable with `--features keyring`.
+default = []
+keyring = ["dep:keyring"]
+
+[dependencies.keyring]
+version = "2"
+optional = true

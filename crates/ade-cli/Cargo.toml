@@ -1,0 +1,17 @@
+[package]
+name = "ade-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ade — CLI-first Agent Development Environment."
+
+[[bin]]
+name = "ade"
+path = "src/main.rs"
+
+[dependencies]
+ade-core = { path = "../ade-core" }
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -1,0 +1,60 @@
+# ADE config. Put this at ~/.config/ade/config.toml (global) or
+# ./.ade/config.toml (per project). Project values override the global ones.
+
+default_model = "claude"
+
+# --- Providers -------------------------------------------------------------
+# "Any agent, any API": every model is just an entry below. Three adapter
+# kinds cover everything — openai | anthropic | gemini. Add an endpoint by
+# adding a block; no code change needed.
+
+[[providers]]
+name = "claude"
+kind = "anthropic"
+model = "claude-opus-4-8"
+api_key = "env:ANTHROPIC_API_KEY"
+
+[[providers]]
+name = "gemini"
+kind = "gemini"
+model = "gemini-2.0-flash"
+api_key = "env:GEMINI_API_KEY"
+
+[[providers]]
+name = "deepseek"
+kind = "openai"                       # OpenAI-compatible
+base_url = "https://api.deepseek.com/v1"
+model = "deepseek-chat"
+api_key = "env:DEEPSEEK_API_KEY"
+
+[[providers]]
+name = "mimo"
+kind = "openai"
+base_url = "https://api.mimo.example/v1"   # set your real endpoint
+model = "mimo-1"
+api_key = "env:MIMO_API_KEY"
+
+# A local OSS model via any OpenAI-compatible server (ollama, vLLM, …):
+[[providers]]
+name = "local"
+kind = "openai"
+base_url = "http://127.0.0.1:11434/v1"
+model = "qwen2.5-coder"
+# no api_key needed
+
+# --- Shared MCP servers ----------------------------------------------------
+# Spawned once, shared by every model. Tools appear as mcp__<server>__<tool>.
+
+# [[mcp]]
+# name = "github"
+# transport = "stdio"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-github"]
+# env = { GITHUB_TOKEN = "env:GH_TOKEN" }
+
+# --- Permission ------------------------------------------------------------
+# Mutating tools (write_file, edit_file, run_shell, MCP) prompt unless they
+# match an allow prefix here.
+
+[permission]
+allow = ["cargo build", "cargo test", "git status"]
