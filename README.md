@@ -58,8 +58,10 @@ into the same list, so every model sees them identically.
 
 ## MCP & skills
 
-- **MCP** — add a `[[mcp]]` block (stdio transport). Servers start once and are
-  shared across all agents; tools appear as `mcp__<server>__<tool>`.
+- **MCP** — add a `[[mcp]]` block (stdio or SSE transport). Servers start once
+  and are shared across all agents; tools appear as `mcp__<server>__<tool>`.
+  For SSE, set `transport = "sse"` and `url = "…/sse"`; `env` entries become
+  request headers (e.g. `Authorization`).
 - **Skills** — create `~/.config/ade/skills/<name>/SKILL.md` (or under
   `./.ade/skills/`). Only name + description load up front; the agent calls
   `use_skill` to pull full instructions on demand.
@@ -120,9 +122,9 @@ Workspace, lib-first so a future GUI shares the core. Built for a tiny binary
 
 ## Status
 
-MVP: multi-model agent loop with **streaming** responses, built-in tools,
-permission gate, shared MCP (stdio) and skills, sessions. Planned: MCP SSE
-transport, Tauri GUI.
+Multi-model agent loop with **streaming** responses, built-in tools, permission
+gate, shared MCP (stdio + SSE) and skills, sessions, plus a Tauri GUI with
+terminals, editor, themes, and preview.
 
 ## License
 
