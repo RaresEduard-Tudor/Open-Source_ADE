@@ -8,7 +8,10 @@
 //! skills, mutating actions auto-approved (an in-GUI approval dialog is the
 //! next step — see README). MCP is CLI-only for now.
 
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -16,17 +19,24 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use ade_core::agent::{Agent, Reporter};
 use ade_core::config::Config;
-use ade_core::permission::{AlwaysAllow, PermissionGate};
+use ade_core::permission::{ApprovalRequest, Approver, Decision, PermissionGate};
 use ade_core::provider;
 use ade_core::session::Session;
 use ade_core::skills::SkillRegistry;
 use ade_core::tools::{ToolContext, ToolRegistry};
 
-/// Process-wide state: loaded config, working dir, and the live conversation.
+/// Process-wide state: loaded config, working dir, the live conversation, and
+/// the bookkeeping that lets a synchronous permission check await a click in
+/// the webview.
 struct AppState {
     cfg: Config,
     cwd: PathBuf,
     session: Mutex<Session>,
+    /// In-flight permission requests: id -> reply channel.
+    pending: Mutex<HashMap<u64, mpsc::Sender<u8>>>,
+    next_perm_id: AtomicU64,
+    /// Tools the user chose "always allow" for this session.
+    session_allow: Mutex<HashSet<String>>,
 }
 
 #[derive(Serialize)]
@@ -78,6 +88,51 @@ impl Reporter for GuiReporter {
     }
 }
 
+/// Approver that asks the webview. `approve` runs on a worker thread inside the
+/// agent loop; it emits a `permission-request` event and blocks on a channel
+/// until [`respond_permission`] delivers the user's choice from another task
+/// (this is why the GUI needs the multi-threaded Tokio runtime).
+struct GuiApprover {
+    app: AppHandle,
+}
+
+impl Approver for GuiApprover {
+    fn approve(&self, req: &ApprovalRequest) -> Decision {
+        let state = self.app.state::<AppState>();
+        if state.session_allow.lock().unwrap().contains(&req.tool) {
+            return Decision::Allow;
+        }
+
+        let id = state.next_perm_id.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = mpsc::channel::<u8>();
+        state.pending.lock().unwrap().insert(id, tx);
+
+        let _ = self.app.emit(
+            "permission-request",
+            serde_json::json!({"id": id, "tool": req.tool, "summary": req.summary}),
+        );
+
+        // 0 = deny, 1 = allow once, 2 = always. Channel error (window closed)
+        // is treated as deny.
+        match rx.recv().unwrap_or(0) {
+            1 => Decision::Allow,
+            2 => {
+                state.session_allow.lock().unwrap().insert(req.tool.clone());
+                Decision::Allow
+            }
+            _ => Decision::Deny,
+        }
+    }
+}
+
+/// Frontend delivers the user's permission choice (0 deny / 1 allow / 2 always).
+#[tauri::command]
+fn respond_permission(state: State<AppState>, id: u64, choice: u8) {
+    if let Some(tx) = state.pending.lock().unwrap().remove(&id) {
+        let _ = tx.send(choice);
+    }
+}
+
 /// Run one user turn. Streams output via events; returns final text or an error.
 #[tauri::command]
 async fn send_prompt(
@@ -92,7 +147,10 @@ async fn send_prompt(
     let skills = std::sync::Arc::new(SkillRegistry::discover(&state.cwd));
     skills.register_tool(&mut registry);
 
-    let gate = PermissionGate::new(state.cfg.permission.allow.clone(), Box::new(AlwaysAllow));
+    let gate = PermissionGate::new(
+        state.cfg.permission.allow.clone(),
+        Box::new(GuiApprover { app: app.clone() }),
+    );
     let ctx = ToolContext { root: state.cwd.clone() };
 
     let mut system = format!(
@@ -134,8 +192,19 @@ pub fn run() {
     let cfg = Config::load(&cwd).unwrap_or_default();
 
     tauri::Builder::default()
-        .manage(AppState { cfg, cwd, session: Mutex::new(Session::new()) })
-        .invoke_handler(tauri::generate_handler![list_models, send_prompt])
+        .manage(AppState {
+            cfg,
+            cwd,
+            session: Mutex::new(Session::new()),
+            pending: Mutex::new(HashMap::new()),
+            next_perm_id: AtomicU64::new(1),
+            session_allow: Mutex::new(HashSet::new()),
+        })
+        .invoke_handler(tauri::generate_handler![
+            list_models,
+            send_prompt,
+            respond_permission
+        ])
         .run(tauri::generate_context!())
         .expect("error while running ADE GUI");
 }

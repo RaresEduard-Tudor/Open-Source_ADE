@@ -94,6 +94,45 @@ listen("tool-call", (e) => {
   el.dataset.pending = "1";
 });
 
+listen("permission-request", (e) => {
+  liveAssistant = null;
+  clearEmpty();
+  const { id, tool, summary } = e.payload;
+  const card = document.createElement("div");
+  card.className = "perm";
+  const q = document.createElement("div");
+  q.className = "perm-q";
+  q.textContent = `Allow ${tool}?`;
+  const s = document.createElement("div");
+  s.className = "perm-summary";
+  s.textContent = summary;
+  const row = document.createElement("div");
+  row.className = "perm-row";
+
+  const mk = (label, choice, cls) => {
+    const b = document.createElement("button");
+    b.className = "perm-btn " + cls;
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      invoke("respond_permission", { id, choice });
+      row.remove();
+      card.classList.add(choice === 0 ? "denied" : "allowed");
+      q.textContent =
+        (choice === 0 ? "Denied " : "Allowed ") + tool + (choice === 2 ? " (always)" : "");
+    });
+    return b;
+  };
+  row.appendChild(mk("Allow", 1, "ok"));
+  row.appendChild(mk("Always", 2, "ok"));
+  row.appendChild(mk("Deny", 0, "no"));
+
+  card.appendChild(q);
+  card.appendChild(s);
+  card.appendChild(row);
+  transcript.appendChild(card);
+  scrollDown();
+});
+
 listen("tool-result", (e) => {
   const r = document.createElement("div");
   r.className = "result " + (e.payload.ok ? "ok" : "bad");
