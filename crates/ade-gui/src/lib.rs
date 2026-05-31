@@ -8,6 +8,7 @@
 //! skills, mutating actions auto-approved (an in-GUI approval dialog is the
 //! next step — see README). MCP is CLI-only for now.
 
+mod git;
 mod terminal;
 
 use std::collections::{HashMap, HashSet};
@@ -468,6 +469,13 @@ pub fn run() {
             session_history,
             clear_session,
             new_window,
+            git::git_status,
+            git::git_diff,
+            git::git_stage,
+            git::git_unstage,
+            git::git_stage_all,
+            git::git_discard,
+            git::git_commit,
             terminal::term_open,
             terminal::term_input,
             terminal::term_resize,

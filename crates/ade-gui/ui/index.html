@@ -36,6 +36,7 @@
           <button class="menu-title">View</button>
           <div class="menu-pop">
             <button class="menu-item" data-action="toggle-explorer">Toggle Explorer<kbd>Ctrl/Cmd B</kbd></button>
+            <button class="menu-item" data-action="show-git">Source Control<kbd>Ctrl/Cmd G</kbd></button>
             <button class="menu-item" data-action="toggle-terminal">Toggle Big Terminal<kbd>Ctrl/Cmd `</kbd></button>
             <button class="menu-item" data-action="toggle-panel">Toggle Bottom Panel<kbd>Ctrl/Cmd J</kbd></button>
             <button class="menu-item" data-action="toggle-chat">Toggle Chat<kbd>Ctrl/Cmd ⇧ C</kbd></button>
@@ -95,8 +96,27 @@
     <div class="body">
       <!-- Explorer -->
       <aside class="sidebar">
-        <div class="pane-head">Explorer</div>
-        <div id="tree" class="tree"></div>
+        <div class="side-tabs">
+          <button class="side-tab active" data-side="files">Explorer</button>
+          <button class="side-tab" data-side="git">Source Control<span id="git-count" class="git-count hidden">0</span></button>
+        </div>
+        <div id="files-view" class="side-view">
+          <div id="tree" class="tree"></div>
+        </div>
+        <div id="git-view" class="side-view hidden">
+          <div class="git-head">
+            <span id="git-branch" class="git-branch">—</span>
+            <button id="git-refresh" class="iconbtn mini" title="Refresh">⟳</button>
+          </div>
+          <div class="git-commit">
+            <textarea id="git-msg" rows="2" placeholder="Commit message (staged changes)"></textarea>
+            <div class="git-commit-row">
+              <button id="git-stage-all" class="ghost mini">Stage all</button>
+              <button id="git-commit-btn" class="ghost mini primary">Commit</button>
+            </div>
+          </div>
+          <div id="git-files" class="git-files"></div>
+        </div>
       </aside>
 
       <div class="splitter v" data-target="sidebar"></div>
@@ -176,6 +196,19 @@
       <div class="palette-box sc-box">
         <div class="sc-head">Keyboard Shortcuts <span class="sc-esc">Esc</span></div>
         <div id="sc-list" class="sc-list"></div>
+      </div>
+    </div>
+
+    <div id="diff-view" class="palette hidden">
+      <div class="palette-box diff-box">
+        <div class="diff-head">
+          <span id="diff-path" class="diff-path">—</span>
+          <span>
+            <button id="diff-action" class="ghost mini"></button>
+            <button id="diff-close" class="ghost mini">Close</button>
+          </span>
+        </div>
+        <div id="diff-body" class="diff-body"></div>
       </div>
     </div>
 

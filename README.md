@@ -88,12 +88,24 @@ Then run it (WSLg shows the window automatically):
 cargo run -p ade-gui
 ```
 
+The window is **frameless** with a custom VSCode-style menu bar (File / Edit /
+View / Terminal / Help) and its own minimize / maximize / close controls — no
+native OS title bar.
+
 **Terminal-first** layout: a big integrated terminal (real PTYs via xterm.js) is
 the centerpiece on launch — `cd` into a project and work — and drops to a small
 bottom panel the moment you open a file (toggle with ⤢ or Ctrl/Cmd+`). Alongside
-it: a resizable Explorer, the editor (Ctrl/Cmd+S save), a **Preview** tab (loads
-a dev server / URL in an iframe), and the agent chat docked on the right with
-markdown rendering and in-app permission prompts (Allow / Always / Deny). An
+it: a resizable sidebar with **Explorer** and **Source Control** tabs, the editor
+(Ctrl/Cmd+S save), a **Preview** tab (loads a dev server / URL in an iframe), and
+the agent chat docked on the right (hide it with Ctrl/Cmd+Shift+C) with markdown
+rendering and in-app permission prompts (Allow / Always / Deny).
+
+**Integrated git** (Ctrl/Cmd+G): the Source Control view shows the branch (with
+ahead/behind), staged and unstaged changes, and a commit box. Click a file for a
+colorized diff; stage / unstage / discard inline; stage-all and commit. It shells
+out to the system `git`, so there's no extra dependency and you see exactly what
+the CLI would. The view refreshes automatically after agent turns and on-disk
+changes, so you watch the agent's edits land in real time. An
 **activity bell** in the topbar aggregates agent actions, tool calls, and
 permission requests so the chat stays uncluttered, and a **command palette** plus
 **keyboard shortcuts** (Ctrl/Cmd+/ for the cheat sheet) drive everything. Open a

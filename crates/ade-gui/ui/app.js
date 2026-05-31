@@ -218,6 +218,7 @@ listen("fs-changed", () => {
   fsTimer = setTimeout(() => {
     reloadOpenFile();
     if (activeEditor) scheduleMinimap(activeEditor);
+    refreshGit();
   }, 250);
 });
 
@@ -583,6 +584,7 @@ async function send() {
     notify(cancelled ? "warn" : "done", cancelled ? "Turn cancelled" : "Turn complete");
     loadTree();
     reloadOpenFile();
+    refreshGit();
   } catch (e) {
     addMessage("assistant", "⚠ " + e);
     setStatus("error", "error");
@@ -1030,6 +1032,7 @@ const SHORTCUTS = [
   ["Ctrl/Cmd + N", "New window"],
   ["Ctrl/Cmd + `", "Toggle big terminal"],
   ["Ctrl/Cmd + B", "Toggle explorer"],
+  ["Ctrl/Cmd + G", "Source control"],
   ["Ctrl/Cmd + J", "Toggle bottom panel"],
   ["Ctrl/Cmd + Shift + C", "Toggle chat"],
   ["Ctrl/Cmd + L", "Focus chat"],
@@ -1073,6 +1076,7 @@ window.addEventListener("keydown", (e) => {
     closeShortcuts();
     closeNotif();
     closeMenus();
+    closeDiff();
     return;
   }
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -1080,6 +1084,12 @@ window.addEventListener("keydown", (e) => {
   if (k === "c" && e.shiftKey) {
     e.preventDefault();
     toggleChat();
+    return;
+  }
+  if (k === "g" && !e.shiftKey) {
+    e.preventDefault();
+    if (document.body.classList.contains("no-sidebar")) toggleSidebar();
+    showSide("git");
     return;
   }
   if (k === "n" && !e.shiftKey) {
@@ -1119,6 +1129,8 @@ COMMANDS.push(
   { kind: "cmd", label: "Toggle Big Terminal", run: toggleFocus },
   { kind: "cmd", label: "Toggle Bottom Panel", run: togglePanel },
   { kind: "cmd", label: "Toggle Chat", run: toggleChat },
+  { kind: "cmd", label: "Source Control", run: () => { if (document.body.classList.contains("no-sidebar")) toggleSidebar(); showSide("git"); } },
+  { kind: "cmd", label: "Git: Stage All", run: () => gitOp("git_stage_all", {}) },
   { kind: "cmd", label: "Notifications", run: toggleNotif }
 );
 
@@ -1138,6 +1150,7 @@ const MENU_ACTIONS = {
   find: () => { const ed = editors.get(activeEditor); if (ed) { setFocus("editor"); ed.cm.focus(); ed.cm.execCommand("find"); } },
   palette: openPalette,
   "toggle-explorer": toggleSidebar,
+  "show-git": () => { if (document.body.classList.contains("no-sidebar")) toggleSidebar(); showSide("git"); },
   "toggle-terminal": toggleFocus,
   "toggle-panel": togglePanel,
   "toggle-chat": toggleChat,
@@ -1181,12 +1194,203 @@ menusEl.querySelectorAll(".menu-item").forEach((it) => {
 });
 document.addEventListener("click", () => { if (menuOpen) closeMenus(); });
 
+// --- source control (git) ---------------------------------------------------
+
+const filesView = $("files-view");
+const gitView = $("git-view");
+const gitFilesEl = $("git-files");
+const gitBranchEl = $("git-branch");
+const gitMsgEl = $("git-msg");
+const gitCountEl = $("git-count");
+const gitCommitBtn = $("git-commit-btn");
+const gitStageAllBtn = $("git-stage-all");
+const diffView = $("diff-view");
+const diffBody = $("diff-body");
+const diffPathEl = $("diff-path");
+const diffActionBtn = $("diff-action");
+
+function gitVisible() {
+  return !gitView.classList.contains("hidden");
+}
+function showSide(side) {
+  document.querySelectorAll(".side-tab").forEach((b) => b.classList.toggle("active", b.dataset.side === side));
+  filesView.classList.toggle("hidden", side !== "files");
+  gitView.classList.toggle("hidden", side !== "git");
+  if (side === "git") refreshGit();
+}
+document.querySelectorAll(".side-tab").forEach((b) =>
+  b.addEventListener("click", () => showSide(b.dataset.side))
+);
+
+const GC_CLASS = { M: "m", A: "a", D: "d", R: "r", C: "r", U: "u", "?": "q" };
+
+async function refreshGit() {
+  let st;
+  try {
+    st = await invoke("git_status");
+  } catch {
+    return;
+  }
+  renderGit(st);
+}
+
+function renderGit(st) {
+  const total = st.repo ? st.staged.length + st.unstaged.length : 0;
+  gitCountEl.textContent = total > 99 ? "99+" : String(total);
+  gitCountEl.classList.toggle("hidden", total === 0);
+
+  if (!st.repo) {
+    gitBranchEl.textContent = "no repository";
+    gitFilesEl.innerHTML = '<div class="git-empty">Not a git repository.<br>Run <code>git init</code> in a terminal.</div>';
+    gitCommitBtn.disabled = true;
+    gitStageAllBtn.disabled = true;
+    return;
+  }
+  gitCommitBtn.disabled = false;
+  gitStageAllBtn.disabled = false;
+  let branch = st.branch || "(detached)";
+  if (st.ahead) branch += ` ↑${st.ahead}`;
+  if (st.behind) branch += ` ↓${st.behind}`;
+  gitBranchEl.textContent = branch;
+
+  gitFilesEl.innerHTML = "";
+  if (!total) {
+    gitFilesEl.innerHTML = '<div class="git-empty">No changes.</div>';
+    return;
+  }
+  if (st.staged.length) {
+    gitFilesEl.appendChild(sectionLabel("Staged Changes"));
+    for (const f of st.staged) gitFilesEl.appendChild(gitRow(f, true));
+  }
+  if (st.unstaged.length) {
+    gitFilesEl.appendChild(sectionLabel("Changes"));
+    for (const f of st.unstaged) gitFilesEl.appendChild(gitRow(f, false));
+  }
+}
+
+function sectionLabel(text) {
+  const el = document.createElement("div");
+  el.className = "git-section";
+  el.textContent = text;
+  return el;
+}
+
+function gitRow(f, staged) {
+  const row = document.createElement("div");
+  row.className = "git-row";
+
+  const gc = document.createElement("span");
+  gc.className = "gc " + (GC_CLASS[f.code] || "u");
+  gc.textContent = f.code;
+
+  const name = document.createElement("span");
+  name.className = "gname";
+  const slash = f.path.lastIndexOf("/");
+  if (slash >= 0) {
+    const dir = document.createElement("span");
+    dir.className = "gdir";
+    dir.textContent = f.path.slice(0, slash + 1);
+    name.append(dir, document.createTextNode(f.path.slice(slash + 1)));
+  } else {
+    name.textContent = f.path;
+  }
+  name.title = f.path;
+
+  const actions = document.createElement("span");
+  actions.className = "gactions";
+  const mkAct = (glyph, title, cls, fn) => {
+    const b = document.createElement("button");
+    b.className = "git-act" + (cls ? " " + cls : "");
+    b.textContent = glyph;
+    b.title = title;
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      fn();
+    });
+    return b;
+  };
+  if (staged) {
+    actions.append(mkAct("−", "Unstage", "", async () => { await gitOp("git_unstage", { path: f.path }); }));
+  } else {
+    actions.append(
+      mkAct("+", "Stage", "", async () => { await gitOp("git_stage", { path: f.path }); }),
+      mkAct("↩", "Discard changes", "danger", async () => {
+        if (!confirm(`Discard changes to ${f.path}? This cannot be undone.`)) return;
+        await gitOp("git_discard", { path: f.path, untracked: f.untracked });
+      })
+    );
+  }
+
+  row.append(gc, name, actions);
+  row.addEventListener("click", () => openDiff(f.path, staged, f.untracked));
+  return row;
+}
+
+async function gitOp(cmd, args) {
+  try {
+    await invoke(cmd, args);
+  } catch (e) {
+    notify("error", cmd + ": " + e);
+  }
+  refreshGit();
+}
+
+async function openDiff(path, staged, untracked) {
+  diffPathEl.textContent = path;
+  diffPathEl.title = path;
+  diffBody.innerHTML = "";
+  let txt = "";
+  try {
+    txt = await invoke("git_diff", { path, staged });
+  } catch (e) {
+    txt = "";
+    diffBody.innerHTML = '<div class="d-empty">diff failed: ' + escapeHtml(String(e)) + "</div>";
+  }
+  if (txt.trim()) diffBody.appendChild(renderDiff(txt));
+  else if (!diffBody.innerHTML)
+    diffBody.innerHTML = '<div class="d-empty">No textual diff (binary or unchanged).</div>';
+
+  diffActionBtn.textContent = staged ? "Unstage" : "Stage";
+  diffActionBtn.onclick = async () => {
+    closeDiff();
+    await gitOp(staged ? "git_unstage" : "git_stage", { path });
+  };
+  void untracked;
+  diffView.classList.remove("hidden");
+}
+function closeDiff() {
+  diffView.classList.add("hidden");
+}
+$("diff-close").addEventListener("click", closeDiff);
+diffView.addEventListener("mousedown", (e) => {
+  if (e.target === diffView) closeDiff();
+});
+
+gitCommitBtn.addEventListener("click", async () => {
+  const message = gitMsgEl.value.trim();
+  if (!message) {
+    gitMsgEl.focus();
+    return;
+  }
+  try {
+    await invoke("git_commit", { message });
+    gitMsgEl.value = "";
+    notify("done", "Committed: " + message.split("\n")[0]);
+    refreshGit();
+  } catch (e) {
+    notify("error", "commit failed: " + e);
+  }
+});
+gitStageAllBtn.addEventListener("click", () => gitOp("git_stage_all", {}));
+$("git-refresh").addEventListener("click", refreshGit);
+
 // --- init -------------------------------------------------------------------
 
 applyTheme(localStorage.getItem("ade-theme") || "dark");
 loadModels();
 loadTree();
 loadRoot();
+refreshGit();
 restoreChat();
 restoreTabs().finally(() => {
   booting = false;
