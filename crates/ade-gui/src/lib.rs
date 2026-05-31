@@ -390,6 +390,7 @@ fn new_window(app: AppHandle) -> Result<(), String> {
     WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
         .title("ADE")
         .inner_size(1200.0, 800.0)
+        .decorations(false)
         .build()
         .map(|_| ())
         .map_err(|e| e.to_string())

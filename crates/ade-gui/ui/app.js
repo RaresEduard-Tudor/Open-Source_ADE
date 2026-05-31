@@ -1,6 +1,7 @@
 // ADE GUI frontend. Uses the global Tauri API (withGlobalTauri) — no bundler.
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+const appWindow = window.__TAURI__.window.getCurrentWindow();
 
 const $ = (id) => document.getElementById(id);
 const transcript = $("transcript");
@@ -949,6 +950,10 @@ function togglePanel() {
     if (activeEditor) renderMinimap(activeEditor);
   }
 }
+function toggleChat() {
+  document.body.classList.toggle("no-chat");
+  if (activeEditor) renderMinimap(activeEditor);
+}
 panelMaxBtn.addEventListener("click", toggleFocus);
 
 // --- notifications (bell + dropdown) ----------------------------------------
@@ -1026,6 +1031,7 @@ const SHORTCUTS = [
   ["Ctrl/Cmd + `", "Toggle big terminal"],
   ["Ctrl/Cmd + B", "Toggle explorer"],
   ["Ctrl/Cmd + J", "Toggle bottom panel"],
+  ["Ctrl/Cmd + Shift + C", "Toggle chat"],
   ["Ctrl/Cmd + L", "Focus chat"],
   ["Ctrl/Cmd + T", "New terminal"],
   ["Ctrl/Cmd + W", "Close editor tab"],
@@ -1066,10 +1072,16 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeShortcuts();
     closeNotif();
+    closeMenus();
     return;
   }
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
   const k = e.key.toLowerCase();
+  if (k === "c" && e.shiftKey) {
+    e.preventDefault();
+    toggleChat();
+    return;
+  }
   if (k === "n" && !e.shiftKey) {
     e.preventDefault();
     invoke("new_window");
@@ -1106,8 +1118,68 @@ COMMANDS.push(
   { kind: "cmd", label: "Toggle Explorer", run: toggleSidebar },
   { kind: "cmd", label: "Toggle Big Terminal", run: toggleFocus },
   { kind: "cmd", label: "Toggle Bottom Panel", run: togglePanel },
+  { kind: "cmd", label: "Toggle Chat", run: toggleChat },
   { kind: "cmd", label: "Notifications", run: toggleNotif }
 );
+
+// --- custom window controls -------------------------------------------------
+
+$("win-min").addEventListener("click", () => appWindow.minimize());
+$("win-max").addEventListener("click", () => appWindow.toggleMaximize());
+$("win-close").addEventListener("click", () => appWindow.close());
+
+// --- menu bar ---------------------------------------------------------------
+
+const MENU_ACTIONS = {
+  "new-window": () => invoke("new_window"),
+  "new-chat": () => clearChatBtn.click(),
+  save: saveActive,
+  "close-tab": () => { if (activeEditor) closeEditor(activeEditor); },
+  find: () => { const ed = editors.get(activeEditor); if (ed) { setFocus("editor"); ed.cm.focus(); ed.cm.execCommand("find"); } },
+  palette: openPalette,
+  "toggle-explorer": toggleSidebar,
+  "toggle-terminal": toggleFocus,
+  "toggle-panel": togglePanel,
+  "toggle-chat": toggleChat,
+  "focus-chat": () => promptEl.focus(),
+  "show-preview": () => { setFocus("terminal"); showPanelTab("preview"); },
+  "new-terminal": () => { setFocus("terminal"); showPanelTab("terminal"); newTerminal(); },
+  "show-terminal": () => { setFocus("terminal"); showPanelTab("terminal"); },
+  shortcuts: toggleShortcuts,
+  "theme-dark": () => applyTheme("dark"),
+  "theme-light": () => applyTheme("light"),
+  "theme-monokai": () => applyTheme("monokai"),
+};
+
+const menusEl = $("menus");
+const menuEls = [...menusEl.querySelectorAll(".menu")];
+let menuOpen = false;
+
+function closeMenus() {
+  menuEls.forEach((m) => m.classList.remove("open"));
+  menuOpen = false;
+}
+function openMenu(m) {
+  closeMenus();
+  m.classList.add("open");
+  menuOpen = true;
+}
+menuEls.forEach((m) => {
+  m.querySelector(".menu-title").addEventListener("click", (e) => {
+    e.stopPropagation();
+    m.classList.contains("open") ? closeMenus() : openMenu(m);
+  });
+  // Hover switches between menus once any is open (native menu-bar feel).
+  m.addEventListener("mouseenter", () => { if (menuOpen) openMenu(m); });
+});
+menusEl.querySelectorAll(".menu-item").forEach((it) => {
+  it.addEventListener("click", () => {
+    const fn = MENU_ACTIONS[it.dataset.action];
+    closeMenus();
+    if (fn) fn();
+  });
+});
+document.addEventListener("click", () => { if (menuOpen) closeMenus(); });
 
 // --- init -------------------------------------------------------------------
 

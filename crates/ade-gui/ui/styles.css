@@ -34,15 +34,53 @@ body { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; overflow
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box; }
 
-/* ---- Top bar ------------------------------------------------------------- */
-.topbar {
-  display: flex; align-items: center; gap: 14px;
-  padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--border);
+/* ---- Menu bar (VSCode-style) -------------------------------------------- */
+.menubar {
+  display: flex; align-items: center; gap: 2px; height: 34px; padding: 0 8px;
+  background: var(--panel); border-bottom: 1px solid var(--border); user-select: none;
 }
-.brand { font-weight: 700; letter-spacing: 0.06em; font-size: 13px; }
-.logo { color: var(--accent); }
-.picker { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
-.picker:first-of-type { margin-left: auto; }
+.app-mark { color: var(--accent); font-size: 14px; padding: 0 8px 0 2px; }
+.menus { display: flex; align-items: center; gap: 1px; }
+.menu { position: relative; }
+.menu-title {
+  background: transparent; border: none; color: var(--text); font: inherit; font-size: 12.5px;
+  padding: 4px 9px; border-radius: 5px; cursor: pointer;
+}
+.menu-title:hover, .menu.open .menu-title { background: var(--panel-2); }
+.menu-pop {
+  position: absolute; top: 100%; left: 0; margin-top: 3px; min-width: 220px; z-index: 70;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); padding: 5px; display: none;
+}
+.menu.open .menu-pop { display: block; }
+.notif.hidden { display: none; }
+.menu-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px; width: 100%;
+  background: transparent; border: none; color: var(--text); font: inherit; font-size: 12.5px;
+  padding: 6px 9px; border-radius: 5px; cursor: pointer; text-align: left;
+}
+.menu-item:hover { background: var(--accent); color: var(--accent-ink); }
+.menu-item kbd {
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px;
+}
+.menu-item:hover kbd { color: var(--accent-ink); border-color: rgba(255,255,255,0.4); background: transparent; }
+.menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+.mb-spacer { flex: 1; align-self: stretch; }
+.app-mark[data-tauri-drag-region] { cursor: default; }
+
+/* Custom window controls (native decorations disabled). */
+.win-controls { display: flex; align-items: center; gap: 0; margin-left: 4px; }
+.winbtn {
+  width: 38px; height: 34px; border: none; background: transparent; color: var(--muted);
+  font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+.winbtn:hover { background: var(--panel-2); color: var(--text); }
+.winbtn.close:hover { background: var(--danger); color: #fff; }
+.mb-model {
+  font-size: 12px; padding: 3px 8px; max-width: 220px;
+}
 select, .url {
   background: var(--bg); color: var(--text); border: 1px solid var(--border);
   border-radius: 6px; padding: 4px 8px; font: inherit;
@@ -70,7 +108,6 @@ select:focus, .url:focus { outline: 1px solid var(--accent); }
 }
 .chat .pane-head { display: flex; align-items: center; justify-content: space-between; }
 .chat .pane-head button { text-transform: none; letter-spacing: 0; }
-.topbar-btn { line-height: 1; }
 
 /* ---- Explorer ------------------------------------------------------------ */
 .tree { overflow: auto; padding: 6px 4px; font-size: 13px; }
@@ -217,6 +254,12 @@ body.no-sidebar .splitter.v[data-target="sidebar"] { display: none; }
 body.no-panel .panel,
 body.no-panel .splitter.h { display: none; }
 
+/* Collapsible chat. */
+body.no-chat .body { grid-template-columns: var(--sidebar-w) 6px 1fr 0 0; }
+body.no-sidebar.no-chat .body { grid-template-columns: 0 0 1fr 0 0; }
+body.no-chat .chat,
+body.no-chat .splitter.v[data-target="chat"] { display: none; }
+
 /* ---- Icon buttons / bell / notifications -------------------------------- */
 .iconbtn {
   background: transparent; border: 1px solid transparent; color: var(--muted);
@@ -234,7 +277,7 @@ body.no-panel .splitter.h { display: none; }
   font-family: var(--mono); border: 1.5px solid var(--panel);
 }
 .notif {
-  position: absolute; top: 38px; right: 0; width: 330px; max-height: 62vh;
+  position: absolute; top: 36px; right: 0; width: 330px; max-height: 62vh;
   background: var(--panel); border: 1px solid var(--border); border-radius: 11px;
   box-shadow: 0 16px 54px rgba(0, 0, 0, 0.5); z-index: 60; display: flex;
   flex-direction: column; overflow: hidden;

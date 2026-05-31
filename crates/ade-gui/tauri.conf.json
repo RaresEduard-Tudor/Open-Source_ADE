@@ -11,11 +11,12 @@
     "windows": [
       {
         "label": "main",
-        "title": "ADE — Agent Development Environment",
+        "title": "ADE",
         "width": 1000,
         "height": 720,
         "minWidth": 640,
-        "minHeight": 480
+        "minHeight": 480,
+        "decorations": false
       }
     ],
     "security": {

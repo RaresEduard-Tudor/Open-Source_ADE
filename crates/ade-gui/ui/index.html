@@ -12,20 +12,59 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body data-theme="dark" data-focus="terminal">
-    <header class="topbar">
-      <div class="brand"><span class="logo">◆</span> ADE</div>
-      <label class="picker">
-        <span>theme</span>
-        <select id="theme">
-          <option value="dark">Dark+</option>
-          <option value="light">Light</option>
-          <option value="monokai">Monokai</option>
-        </select>
-      </label>
-      <label class="picker">
-        <span>model</span>
-        <select id="model"></select>
-      </label>
+    <header class="menubar">
+      <span class="app-mark" title="ADE" data-tauri-drag-region>◆</span>
+      <nav class="menus" id="menus">
+        <div class="menu" data-menu="file">
+          <button class="menu-title">File</button>
+          <div class="menu-pop">
+            <button class="menu-item" data-action="new-window">New Window<kbd>Ctrl/Cmd N</kbd></button>
+            <button class="menu-item" data-action="new-chat">New Chat</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item" data-action="save">Save File<kbd>Ctrl/Cmd S</kbd></button>
+            <button class="menu-item" data-action="close-tab">Close Tab<kbd>Ctrl/Cmd W</kbd></button>
+          </div>
+        </div>
+        <div class="menu" data-menu="edit">
+          <button class="menu-title">Edit</button>
+          <div class="menu-pop">
+            <button class="menu-item" data-action="find">Find in File<kbd>Ctrl/Cmd F</kbd></button>
+            <button class="menu-item" data-action="palette">Command Palette<kbd>Ctrl/Cmd ⇧ P</kbd></button>
+          </div>
+        </div>
+        <div class="menu" data-menu="view">
+          <button class="menu-title">View</button>
+          <div class="menu-pop">
+            <button class="menu-item" data-action="toggle-explorer">Toggle Explorer<kbd>Ctrl/Cmd B</kbd></button>
+            <button class="menu-item" data-action="toggle-terminal">Toggle Big Terminal<kbd>Ctrl/Cmd `</kbd></button>
+            <button class="menu-item" data-action="toggle-panel">Toggle Bottom Panel<kbd>Ctrl/Cmd J</kbd></button>
+            <button class="menu-item" data-action="toggle-chat">Toggle Chat<kbd>Ctrl/Cmd ⇧ C</kbd></button>
+            <button class="menu-item" data-action="focus-chat">Focus Chat<kbd>Ctrl/Cmd L</kbd></button>
+            <button class="menu-item" data-action="show-preview">Preview</button>
+            <div class="menu-sep"></div>
+            <button class="menu-item" data-action="theme-dark">Theme: Dark+</button>
+            <button class="menu-item" data-action="theme-light">Theme: Light</button>
+            <button class="menu-item" data-action="theme-monokai">Theme: Monokai</button>
+          </div>
+        </div>
+        <div class="menu" data-menu="terminal">
+          <button class="menu-title">Terminal</button>
+          <div class="menu-pop">
+            <button class="menu-item" data-action="new-terminal">New Terminal<kbd>Ctrl/Cmd T</kbd></button>
+            <button class="menu-item" data-action="show-terminal">Show Terminal</button>
+          </div>
+        </div>
+        <div class="menu" data-menu="help">
+          <button class="menu-title">Help</button>
+          <div class="menu-pop">
+            <button class="menu-item" data-action="shortcuts">Keyboard Shortcuts<kbd>Ctrl/Cmd /</kbd></button>
+          </div>
+        </div>
+      </nav>
+
+      <div class="mb-spacer" data-tauri-drag-region></div>
+
+      <select id="model" class="mb-model" title="Active model"></select>
       <div id="status" class="status idle">ready</div>
       <div class="bell-wrap">
         <button id="bell" class="iconbtn" title="Activity (notifications)">
@@ -40,7 +79,17 @@
           <div id="notif-list" class="notif-list"></div>
         </div>
       </div>
-      <button id="new-window" class="iconbtn topbar-btn" title="New window (Ctrl/Cmd+N)">⧉</button>
+      <button id="new-window" class="iconbtn" title="New window (Ctrl/Cmd+N)">⧉</button>
+      <div class="win-controls">
+        <button id="win-min" class="winbtn" title="Minimize">‒</button>
+        <button id="win-max" class="winbtn" title="Maximize">▢</button>
+        <button id="win-close" class="winbtn close" title="Close">✕</button>
+      </div>
+      <select id="theme" class="hidden">
+        <option value="dark">Dark+</option>
+        <option value="light">Light</option>
+        <option value="monokai">Monokai</option>
+      </select>
     </header>
 
     <div class="body">
